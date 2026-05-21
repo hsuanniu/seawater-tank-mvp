@@ -159,6 +159,16 @@ export function createTankStore({ storageKey, onChange = () => {}, onDosingDebug
       notify({ forms: true });
       return newTank;
     },
+    deleteTank(tankId) {
+      if (state.tanks.length <= 1) return { deleted: false, reason: "LAST_TANK" };
+      const deletedTank = state.tanks.find((tank) => tank.id === tankId);
+      if (!deletedTank) return { deleted: false, reason: "NOT_FOUND" };
+      state.tanks = state.tanks.filter((tank) => tank.id !== tankId);
+      if (state.activeTankId === tankId) state.activeTankId = state.tanks[0].id;
+      persist();
+      notify({ forms: true, cloud: true });
+      return { deleted: true, deletedTank, activeTank: getActiveTank() };
+    },
     updateTankSettings({ name, volume, targets, targetInputs }) {
       const tank = getActiveTank().tank;
       tank.name = name || DEFAULT_TANK.name;

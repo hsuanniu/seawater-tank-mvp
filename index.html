@@ -7,7 +7,7 @@
     <meta name="theme-color" content="#0b2f48" />
     <link rel="manifest" href="manifest.webmanifest" />
     <link rel="apple-touch-icon" href="icons/icon-192.svg" />
-    <link rel="stylesheet" href="styles.css?v=20260521-render-paths" />
+    <link rel="stylesheet" href="styles.css?v=20260521-delete-tank" />
   </head>
   <body>
     <div class="app-shell">
@@ -44,6 +44,7 @@
               <select id="tankSelect" aria-label="切換魚缸"></select>
             </label>
             <button class="ghost-button" id="addTankBtn">新增魚缸</button>
+            <button class="danger-button delete-tank-button" id="deleteTankBtn" title="刪除目前選取的魚缸">刪除魚缸</button>
             <div class="backup-actions" aria-label="資料備份">
               <button class="ghost-button" id="exportBtn" title="下載這台裝置目前的資料備份">下載備份</button>
               <label class="ghost-button file-button" title="選擇備份檔，確認後覆蓋這台裝置資料">
@@ -488,7 +489,7 @@
     </nav>
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script type="module" src="app.module.js?v=20260521-render-paths"></script>
-    <script defer src="app.js?v=20260521-render-paths"></script>
+    <script type="module" src="app.module.js?v=20260521-delete-tank"></script>
+    <script defer src="app.js?v=20260521-delete-tank"></script>
   </body>
 </html>

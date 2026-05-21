@@ -428,10 +428,17 @@ function renderForms() {
 
 function renderTankSwitcher() {
   const select = document.querySelector("#tankSelect");
+  const deleteButton = document.querySelector("#deleteTankBtn");
   const storeState = TankStore.getState();
   select.innerHTML = storeState.tanks
     .map((tank) => `<option value="${escapeHtml(tank.id)}" ${tank.id === storeState.activeTankId ? "selected" : ""}>${escapeHtml(tank.tank.name)}</option>`)
     .join("");
+  if (deleteButton) {
+    deleteButton.disabled = storeState.tanks.length <= 1;
+    deleteButton.title = storeState.tanks.length <= 1
+      ? "至少要保留一個魚缸"
+      : "刪除目前選取的魚缸";
+  }
 }
 
 function dashboardTone(row) {
@@ -1395,6 +1402,29 @@ function setupEvents() {
     TankStore.addTank(`魚缸 ${TankStore.getState().tanks.length + 1}`);
     switchPage("tank");
     showToast("新魚缸已建立");
+  });
+
+  document.querySelector("#deleteTankBtn").addEventListener("click", () => {
+    const storeState = TankStore.getState();
+    if (storeState.tanks.length <= 1) {
+      showToast("至少要保留一個魚缸，最後一個魚缸不可刪除。");
+      return;
+    }
+    const message = `確定要刪除這個魚缸嗎？
+此魚缸的：
+- 水質紀錄
+- 滴定設定
+- 歷史事件
+- 餵食
+- 添加物
+都會一起刪除，而且無法復原。`;
+    if (!confirm(message)) return;
+    const result = TankStore.deleteTank(storeState.activeTankId);
+    if (!result.deleted) {
+      showToast(result.reason === "LAST_TANK" ? "最後一個魚缸不可刪除。" : "找不到要刪除的魚缸。");
+      return;
+    }
+    showToast(`魚缸已刪除，已切換到 ${tankSettings().name}。`);
   });
 
   document.querySelector("#saveCloudConfigBtn").addEventListener("click", async () => {

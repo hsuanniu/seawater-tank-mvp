@@ -1,5 +1,5 @@
 (function bootstrapModuleApp() {
-  const moduleSrc = "app.module.js?v=20260521-render-paths";
+  const moduleSrc = "app.module.js?v=20260521-delete-tank";
   const alreadyLoaded = Array.from(document.scripts).some((script) => script.src.includes("app.module.js"));
   if (alreadyLoaded) return;
 

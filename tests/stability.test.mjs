@@ -154,6 +154,39 @@ test("Measurement Store updates same-date records instead of creating duplicates
   assert.equal(store.getMeasurements()[0].kh, 8.6);
 });
 
+test("Tank Store keeps the final tank and refuses destructive deletion", () => {
+  useStorage();
+  const store = createStore("last-tank");
+  const onlyTankId = store.getState().activeTankId;
+  const result = store.deleteTank(onlyTankId);
+
+  assert.equal(result.deleted, false);
+  assert.equal(result.reason, "LAST_TANK");
+  assert.equal(store.getState().tanks.length, 1);
+  assert.equal(store.getState().activeTankId, onlyTankId);
+});
+
+test("Tank Store deletes the active tank data and switches to another tank", () => {
+  useStorage();
+  const store = createStore("delete-active-tank");
+  const firstTankId = store.getState().activeTankId;
+  const secondTank = store.addTank("刪除測試缸");
+  store.upsertMeasurementByDate(completeMeasurement({ date: "2026-05-21" }));
+  store.updateDosing({ kh: 6.6 });
+  store.addFeeding({ date: "2026-05-21", amountLevel: "中" });
+  store.addAdditive({ date: "2026-05-21", item: "red-sea-ab-plus" });
+  store.addEvent({ date: "2026-05-21", type: "manual" });
+  const result = store.deleteTank(secondTank.id);
+  const snapshot = store.serializeState();
+
+  assert.equal(result.deleted, true);
+  assert.equal(snapshot.activeTankId, firstTankId);
+  assert.equal(snapshot.tanks.length, 1);
+  assert.equal(snapshot.tanks.some((tank) => tank.id === secondTank.id), false);
+  assert.equal(store.getMeasurements().length, 0);
+  assert.equal(store.getDosing().kh, 0);
+});
+
 test("Backdated blank measurements cannot inherit from a future record", () => {
   const result = buildMeasurementRecord(
     { date: "2026-05-01" },
