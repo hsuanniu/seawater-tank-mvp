@@ -1,29 +1,29 @@
-const CACHE_NAME = "seawater-tank-mvp-v24";
+const CACHE_NAME = "seawater-tank-mvp-v25";
 const APP_SHELL = [
   "./",
-  "./index.html",
-  "./styles.css",
-  "./app.js",
-  "./app.module.js",
-  "./manifest.webmanifest",
-  "./modules/tankModule.js",
-  "./modules/additiveLogModule.js",
-  "./modules/bioLoadModule.js",
-  "./modules/feedingLogModule.js",
-  "./modules/measurementModule.js",
-  "./modules/dosingModule.js",
-  "./modules/eventTimelineModule.js",
-  "./services/formatService.js",
-  "./services/backupService.js",
-  "./services/storageService.js",
-  "./services/tankStore.js",
-  "./engines/safetyEngine.js",
-  "./engines/analysisEngine.js",
-  "./components/aiExplanationModule.js",
-  "./components/dashboardModule.js",
-  "./types/domainTypes.js",
-  "./icons/icon-192.svg",
-  "./icons/icon-512.svg",
+  "index.html",
+  "styles.css",
+  "app.js",
+  "app.module.js",
+  "manifest.webmanifest",
+  "modules/tankModule.js",
+  "modules/additiveLogModule.js",
+  "modules/bioLoadModule.js",
+  "modules/feedingLogModule.js",
+  "modules/measurementModule.js",
+  "modules/dosingModule.js",
+  "modules/eventTimelineModule.js",
+  "services/formatService.js",
+  "services/backupService.js",
+  "services/storageService.js",
+  "services/tankStore.js",
+  "engines/safetyEngine.js",
+  "engines/analysisEngine.js",
+  "components/aiExplanationModule.js",
+  "components/dashboardModule.js",
+  "types/domainTypes.js",
+  "icons/icon-192.svg",
+  "icons/icon-512.svg",
 ];
 
 self.addEventListener("install", (event) => {
@@ -51,6 +51,6 @@ self.addEventListener("fetch", (event) => {
         caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
         return response;
       })
-      .catch(() => caches.match(event.request).then((cached) => cached || caches.match("./index.html"))),
+      .catch(() => caches.match(event.request).then((cached) => cached || caches.match("index.html"))),
   );
 });

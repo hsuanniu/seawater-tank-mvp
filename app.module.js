@@ -1632,7 +1632,7 @@ refreshCloudSession();
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw.js").catch(() => {
+    navigator.serviceWorker.register("sw.js").catch(() => {
       // PWA registration is optional; the app still works as a normal website.
     });
   });
