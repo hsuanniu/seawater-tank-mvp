@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: seawater-tank-mvp
+    runtime: static
+    staticPublishPath: .
+    pullRequestPreviewsEnabled: false

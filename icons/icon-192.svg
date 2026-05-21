@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="192" height="192" viewBox="0 0 192 192" role="img" aria-label="海水缸 App icon">
+  <rect width="192" height="192" rx="42" fill="#0b2f48"/>
+  <path d="M30 118c18 17 46 22 68 9 20-12 43-12 64 0v25c-22-13-45-13-65 0-23 14-50 9-67-8z" fill="#27b6cf"/>
+  <path d="M33 78c18-16 43-20 64-8 21 12 44 12 62 0v25c-19 12-43 12-64 0-21-12-45-8-62 8z" fill="#e7f6ee"/>
+  <circle cx="62" cy="58" r="8" fill="#f7c85d"/>
+  <text x="96" y="121" text-anchor="middle" font-family="Arial, sans-serif" font-size="44" font-weight="800" fill="#ffffff">SW</text>
+</svg>

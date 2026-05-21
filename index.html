@@ -1,0 +1,493 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>海水缸水質追蹤與滴定調整工具</title>
+    <meta name="theme-color" content="#0b2f48" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="./icons/icon-192.svg" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">SW</div>
+          <div>
+            <h1>海水缸管理</h1>
+            <p>水質追蹤與滴定建議</p>
+          </div>
+        </div>
+        <nav class="nav" aria-label="主要導覽">
+          <button class="nav-link active" data-section="dashboard">首頁</button>
+          <button class="nav-link" data-section="tank">魚缸設定</button>
+          <button class="nav-link" data-section="water">新增水質紀錄</button>
+          <button class="nav-link" data-section="dosing">滴定設定</button>
+          <button class="nav-link" data-section="bio-load">生物負載</button>
+          <button class="nav-link" data-section="analysis">分析結果</button>
+          <button class="nav-link" data-section="history">歷史紀錄</button>
+          <button class="nav-link" data-section="trends">趨勢圖表</button>
+          <button class="nav-link" data-section="cloud">雲端同步</button>
+        </nav>
+      </aside>
+
+      <main class="content">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">MVP 單機版</p>
+            <h2 id="pageTitle">首頁</h2>
+          </div>
+          <div class="topbar-actions">
+            <label class="tank-picker">
+              魚缸
+              <select id="tankSelect" aria-label="切換魚缸"></select>
+            </label>
+            <button class="ghost-button" id="addTankBtn">新增魚缸</button>
+            <div class="backup-actions" aria-label="資料備份">
+              <button class="ghost-button" id="exportBtn" title="下載這台裝置目前的資料備份">下載備份</button>
+              <label class="ghost-button file-button" title="選擇備份檔，確認後覆蓋這台裝置資料">
+                用備份還原
+                <input id="importInput" type="file" accept="application/json" />
+              </label>
+            </div>
+          </div>
+        </header>
+        <div id="appFeedback" class="app-feedback" role="status" aria-live="polite"></div>
+
+        <section id="dashboard" class="page active">
+          <div id="focusPanel" class="focus-panel"></div>
+          <div class="hero-panel dashboard-hero">
+            <div>
+              <p class="eyebrow">快速記錄</p>
+              <h3 id="tankNameDisplay">我的海水缸</h3>
+              <p id="dashboardMeta">尚未建立紀錄</p>
+            </div>
+            <div class="hero-actions">
+              <button class="primary-button" data-goto="water">新增測量</button>
+              <button class="ghost-button" data-goto="analysis">完整分析</button>
+            </div>
+          </div>
+          <div id="latestCards" class="metric-grid"></div>
+          <div class="two-column">
+            <article class="panel">
+              <div class="panel-heading">
+                <h3>本週滴定建議</h3>
+                <span class="badge">保守規則</span>
+              </div>
+              <div id="dashboardAdvice" class="advice-block"></div>
+            </article>
+            <article class="panel">
+              <div class="panel-heading">
+                <h3>智慧摘要</h3>
+                <span class="badge muted">自動整理</span>
+              </div>
+              <div id="maintenanceSummary" class="summary-list"></div>
+            </article>
+          </div>
+        </section>
+
+        <section id="tank" class="page">
+          <form id="tankForm" class="panel form-panel">
+            <div class="panel-heading">
+              <h3>魚缸基本設定</h3>
+              <span class="badge">可自訂目標</span>
+            </div>
+            <div class="form-grid">
+              <label>魚缸名稱<input name="name" required /></label>
+              <label>總水量 L<input name="volume" type="text" inputmode="decimal" required /></label>
+            </div>
+            <div class="notice compact">
+              目標可輸入範圍或中心值，例如 8-9、0.25~2、400+/-20、1350 +/-30、400。單一數值會依項目預設容忍值自動展開。
+            </div>
+            <div class="target-grid" id="targetInputs"></div>
+            <button class="primary-button" type="submit">儲存魚缸設定</button>
+          </form>
+        </section>
+
+        <section id="water" class="page">
+          <form id="waterForm" class="panel form-panel measurement-form">
+            <div class="panel-heading">
+              <h3>新增水質紀錄</h3>
+              <span class="badge">本次測量</span>
+            </div>
+            <div class="notice compact">
+              沒有測量的項目可留空，系統會沿用上一筆數值並標記「沿用」。沿用項目不會用來產生滴定調整。
+            </div>
+            <div class="section-label">主要元素</div>
+            <div class="form-grid wide measurement-grid">
+              <label class="measurement-date">日期<input name="date" type="date" required /></label>
+              <label>KH dKH<input name="kh" type="text" inputmode="decimal" placeholder="留空沿用" /></label>
+              <label>CA ppm<input name="ca" type="text" inputmode="decimal" placeholder="留空沿用" /></label>
+              <label>MG ppm<input name="mg" type="text" inputmode="decimal" placeholder="留空沿用" /></label>
+              <label>鉀(K) ppm<input name="k" type="text" inputmode="decimal" placeholder="留空沿用" /></label>
+            </div>
+            <div class="section-label">營養鹽與環境</div>
+            <div class="form-grid wide measurement-grid">
+              <label>NO3 ppm<input name="no3" type="text" inputmode="decimal" placeholder="留空沿用" /></label>
+              <label>PO4 ppm<input name="po4" type="text" inputmode="decimal" placeholder="留空沿用" /></label>
+              <label>鹽度<input name="salinity" type="text" inputmode="decimal" placeholder="1.026" /></label>
+              <label>水溫 °C<input name="temperature" type="text" inputmode="decimal" placeholder="25.5" /></label>
+            </div>
+            <label class="full-label">備註<textarea name="note" rows="3"></textarea></label>
+            <button class="primary-button" type="submit">儲存水質紀錄</button>
+          </form>
+        </section>
+
+        <section id="dosing" class="page">
+          <form id="dosingForm" class="panel form-panel">
+            <div class="panel-heading">
+              <h3>目前滴定設定</h3>
+              <span class="badge">ml/day</span>
+            </div>
+            <div class="notice compact">
+              若本週有關掉滴定，可關閉項目或填暫停天數。暫停中的項目分析時會先建議觀察，不會直接放大補量。
+            </div>
+            <div id="dosingSaveStatus" class="dosing-save-status">尚未儲存滴定設定</div>
+            <div class="section-label">主要滴定</div>
+            <div class="dosing-grid">
+              <div class="dose-card">
+                <label>Red Sea KH ml/day<input name="kh" type="text" inputmode="decimal" /></label>
+                <label class="switch-row"><input name="khEnabled" type="checkbox" />目前啟用</label>
+                <label>本週暫停天數<input name="khPausedDays" type="text" inputmode="numeric" /></label>
+              </div>
+              <div class="dose-card">
+                <label>Red Sea CA ml/day<input name="ca" type="text" inputmode="decimal" /></label>
+                <label class="switch-row"><input name="caEnabled" type="checkbox" />目前啟用</label>
+                <label>本週暫停天數<input name="caPausedDays" type="text" inputmode="numeric" /></label>
+              </div>
+              <div class="dose-card">
+                <label>Red Sea MG ml/day<input name="mg" type="text" inputmode="decimal" /></label>
+                <label class="switch-row"><input name="mgEnabled" type="checkbox" />目前啟用</label>
+                <label>本週暫停天數<input name="mgPausedDays" type="text" inputmode="numeric" /></label>
+              </div>
+            </div>
+            <div class="section-label">微量元素與自訂添加</div>
+            <div class="dosing-grid">
+              <div class="dose-card">
+                <label>Tropic Marin A+ ml/day<input name="aplus" type="text" inputmode="decimal" /></label>
+                <label class="switch-row"><input name="aplusEnabled" type="checkbox" />目前啟用</label>
+                <label>本週暫停天數<input name="aplusPausedDays" type="text" inputmode="numeric" /></label>
+              </div>
+              <div class="dose-card">
+                <label>Tropic Marin 鉀(K)+ ml/day<input name="kplus" type="text" inputmode="decimal" /></label>
+                <label class="switch-row"><input name="kplusEnabled" type="checkbox" />目前啟用</label>
+                <label>本週暫停天數<input name="kplusPausedDays" type="text" inputmode="numeric" /></label>
+              </div>
+              <div class="dose-card">
+                <label>自訂添加劑名稱<input name="customName" /></label>
+                <label>自訂添加劑 ml/day<input name="customDose" type="text" inputmode="decimal" /></label>
+                <label class="switch-row"><input name="customEnabled" type="checkbox" />目前啟用</label>
+                <label>本週暫停天數<input name="customPausedDays" type="text" inputmode="numeric" /></label>
+              </div>
+            </div>
+            <button class="primary-button" type="submit">儲存滴定設定</button>
+          </form>
+
+          <form id="maintenanceForm" class="panel form-panel">
+            <div class="panel-heading">
+              <h3>維護紀錄</h3>
+              <span class="badge">本週事件</span>
+            </div>
+            <div class="form-grid wide">
+              <label>本週換水次數<input name="waterChangeCount" type="text" inputmode="numeric" /></label>
+              <label>每次換水量 L<input name="waterChangeVolume" type="text" inputmode="decimal" /></label>
+              <label class="checkbox-row"><input name="newFish" type="checkbox" />新增魚隻</label>
+              <label class="checkbox-row"><input name="newCoral" type="checkbox" />新增珊瑚</label>
+              <label class="checkbox-row"><input name="moreFeeding" type="checkbox" />增加餵食</label>
+              <label class="checkbox-row"><input name="changedAdditive" type="checkbox" />更換添加劑</label>
+            </div>
+            <label class="full-label">備註<textarea name="note" rows="3"></textarea></label>
+            <button class="primary-button" type="submit">儲存維護紀錄</button>
+          </form>
+        </section>
+
+        <section id="bio-load" class="page">
+          <div class="two-column">
+            <form id="fishForm" class="panel form-panel">
+              <div class="panel-heading">
+                <h3>魚隻資料</h3>
+                <span class="badge">生物負載</span>
+              </div>
+              <div class="form-grid">
+                <label>名稱<input name="name" required placeholder="例如 小丑魚" /></label>
+                <label>數量<input name="quantity" type="text" inputmode="numeric" required value="1" /></label>
+                <label>新增日期<input name="addedAt" type="date" required /></label>
+              </div>
+              <button class="primary-button" type="submit">新增魚隻</button>
+            </form>
+
+            <form id="feedingForm" class="panel form-panel">
+              <div class="panel-heading">
+                <h3>餵食紀錄</h3>
+                <span class="badge">參考因素</span>
+              </div>
+              <div class="form-grid">
+                <label>日期<input name="date" type="date" required /></label>
+                <label>餵食量
+                  <select name="amountLevel">
+                    <option>少</option>
+                    <option selected>中</option>
+                    <option>多</option>
+                  </select>
+                </label>
+                <label>餵食頻率
+                  <select name="frequency">
+                    <option>單次</option>
+                    <option selected>每天 1 次</option>
+                    <option>每天 2 次</option>
+                    <option>每天 3 次以上</option>
+                    <option>每週數次</option>
+                    <option>不固定</option>
+                  </select>
+                </label>
+              </div>
+              <div class="checkbox-group">
+                <label class="checkbox-row"><input name="foodTypes" type="checkbox" value="shrimp" />蝦子</label>
+                <label class="checkbox-row"><input name="foodTypes" type="checkbox" value="frozen-food" />冷凍飼料</label>
+                <label class="checkbox-row"><input name="foodTypes" type="checkbox" value="fish-pellet" />魚飼料</label>
+                <label class="checkbox-row"><input name="foodTypes" type="checkbox" value="coral-food" />珊瑚糧</label>
+              </div>
+              <label class="full-label">備註<textarea name="note" rows="2"></textarea></label>
+              <button class="primary-button" type="submit">新增餵食紀錄</button>
+            </form>
+          </div>
+
+          <div class="two-column">
+            <form id="additiveForm" class="panel form-panel">
+              <div class="panel-heading">
+                <h3>添加物紀錄</h3>
+                <span class="badge">不自動修正</span>
+              </div>
+              <div class="form-grid">
+                <label>日期<input name="date" type="date" required /></label>
+                <label>添加物
+                  <select name="item">
+                    <option value="red-sea-ab-plus">Red Sea AB+</option>
+                    <option value="tm-a-plus">Tropic Marin A+</option>
+                    <option value="tm-k-plus">Tropic Marin K+</option>
+                    <option value="amin-amino">AMIN（胺基酸）</option>
+                    <option value="tm-nitribiotic">TM 硝化益生菌</option>
+                  </select>
+                </label>
+                <label>添加量 ml<input name="doseMl" type="text" inputmode="decimal" required placeholder="例如 5" /></label>
+                <label>頻率
+                  <select name="frequency">
+                    <option>單次</option>
+                    <option>每天</option>
+                    <option>每週 1 次</option>
+                    <option>每週 2 次</option>
+                    <option>每週 3 次</option>
+                    <option>不固定</option>
+                  </select>
+                </label>
+              </div>
+              <div class="checkbox-group">
+                <label class="checkbox-row"><input name="coralFed" type="checkbox" />是否餵珊瑚</label>
+                <label class="checkbox-row"><input name="autoDosed" type="checkbox" />是否自動滴定</label>
+              </div>
+              <label class="full-label">備註<textarea name="note" rows="2"></textarea></label>
+              <button class="primary-button" type="submit">新增添加紀錄</button>
+            </form>
+
+            <article class="panel">
+              <div class="panel-heading">
+                <h3>近期參考因素</h3>
+                <span class="badge muted">只供判斷</span>
+              </div>
+              <div id="bioLoadSummary" class="summary-list"></div>
+            </article>
+          </div>
+
+          <div class="two-column">
+            <form id="additiveScheduleForm" class="panel form-panel">
+              <div class="panel-heading">
+                <h3>每週固定添加</h3>
+                <span class="badge">排程參考</span>
+              </div>
+              <div class="form-grid">
+                <label>星期
+                  <select name="weekday">
+                    <option value="1">星期一</option>
+                    <option value="2">星期二</option>
+                    <option value="3">星期三</option>
+                    <option value="4">星期四</option>
+                    <option value="5">星期五</option>
+                    <option value="6">星期六</option>
+                    <option value="0">星期日</option>
+                  </select>
+                </label>
+                <label>添加物
+                  <select name="item">
+                    <option value="red-sea-ab-plus">Red Sea AB+</option>
+                    <option value="tm-a-plus">Tropic Marin A+</option>
+                    <option value="tm-k-plus">Tropic Marin K+</option>
+                    <option value="amin-amino">AMIN（胺基酸）</option>
+                    <option value="tm-nitribiotic">TM 硝化益生菌</option>
+                  </select>
+                </label>
+                <label>預設添加量 ml<input name="doseMl" type="text" inputmode="decimal" required placeholder="例如 5" /></label>
+                <label class="switch-row"><input name="enabled" type="checkbox" checked />啟用</label>
+              </div>
+              <label class="full-label">備註<textarea name="note" rows="2"></textarea></label>
+              <button class="primary-button" type="submit">新增固定添加</button>
+            </form>
+
+            <article class="panel">
+              <div class="panel-heading">
+                <h3>固定添加表</h3>
+                <span class="badge muted">每週</span>
+              </div>
+              <div id="additiveScheduleList" class="summary-list"></div>
+            </article>
+          </div>
+
+          <div class="two-column">
+            <article class="panel">
+              <div class="panel-heading">
+                <h3>魚隻清單</h3>
+                <span class="badge muted">目前</span>
+              </div>
+              <div id="fishList" class="summary-list"></div>
+            </article>
+            <article class="panel">
+              <div class="panel-heading">
+                <h3>餵食 / 添加紀錄</h3>
+                <span class="badge muted">最新</span>
+              </div>
+              <div id="bioLogList" class="summary-list"></div>
+            </article>
+          </div>
+        </section>
+
+        <section id="analysis" class="page">
+          <article class="panel">
+            <div class="panel-heading">
+              <h3>分析結果</h3>
+              <span class="badge">固定格式</span>
+            </div>
+            <div id="analysisOutput" class="analysis-output"></div>
+          </article>
+        </section>
+
+        <section id="history" class="page">
+          <article class="panel timeline-panel">
+            <div class="panel-heading timeline-heading">
+              <div>
+                <h3>事件時間線</h3>
+                <p id="timelineMeta" class="panel-subtitle">目前 0 筆事件</p>
+              </div>
+              <label class="timeline-filter">
+                事件類型
+                <select id="timelineTypeFilter" aria-label="篩選時間線事件類型">
+                  <option value="all">全部事件</option>
+                  <option value="measurement">水質測量</option>
+                  <option value="dosing-apply">滴定套用</option>
+                  <option value="water-change">換水</option>
+                  <option value="feeding">餵食</option>
+                  <option value="additive">添加物</option>
+                  <option value="fish">魚隻</option>
+                </select>
+              </label>
+            </div>
+            <div id="eventTimeline" class="event-timeline"></div>
+          </article>
+          <article class="panel">
+            <div class="panel-heading">
+              <div>
+                <h3>歷史紀錄</h3>
+                <p id="historyMeta" class="panel-subtitle">目前 0 筆</p>
+              </div>
+              <button class="danger-button" id="clearBtn">清除所有資料</button>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>日期</th>
+                    <th>KH</th>
+                    <th>CA</th>
+                    <th>MG</th>
+                    <th>鉀(K)</th>
+                    <th>NO3</th>
+                    <th>PO4</th>
+                    <th>鹽度</th>
+                    <th>水溫</th>
+                    <th>備註</th>
+                    <th>脈絡</th>
+                  </tr>
+                </thead>
+                <tbody id="historyBody"></tbody>
+              </table>
+            </div>
+          </article>
+        </section>
+
+        <section id="trends" class="page">
+          <article class="panel">
+            <div class="panel-heading">
+              <h3>趨勢圖表</h3>
+              <select id="trendSelect" aria-label="選擇趨勢項目">
+                <option value="kh">KH</option>
+                <option value="ca">CA</option>
+                <option value="mg">MG</option>
+                <option value="k">鉀(K)</option>
+                <option value="no3">NO3</option>
+                <option value="po4">PO4</option>
+              </select>
+            </div>
+            <div id="chart" class="chart"></div>
+          </article>
+        </section>
+
+        <section id="cloud" class="page">
+          <article class="panel form-panel">
+            <div class="panel-heading">
+              <h3>雲端同步</h3>
+              <span class="badge" id="cloudStatusBadge">未連線</span>
+            </div>
+            <div class="notice compact">
+              雲端同步使用 Supabase。請先建立 Supabase 專案，執行本專案提供的 SQL，再填入 Project URL 與 anon key。
+            </div>
+            <div class="form-grid">
+              <label>Supabase Project URL<input id="supabaseUrl" type="url" placeholder="https://xxxx.supabase.co" /></label>
+              <label>Supabase anon key<input id="supabaseAnonKey" type="password" placeholder="sb_publishable_..." /></label>
+            </div>
+            <div class="button-row">
+              <button class="ghost-button" id="saveCloudConfigBtn" type="button">儲存雲端設定</button>
+              <button class="ghost-button" id="clearCloudConfigBtn" type="button">清除雲端設定</button>
+            </div>
+
+            <div class="section-label">登入</div>
+            <div class="form-grid">
+              <label>Email<input id="authEmail" type="email" autocomplete="email" /></label>
+              <label>密碼<input id="authPassword" type="password" autocomplete="current-password" /></label>
+            </div>
+            <div class="button-row">
+              <button class="primary-button" id="signInBtn" type="button">登入</button>
+              <button class="ghost-button" id="signUpBtn" type="button">建立帳號</button>
+              <button class="ghost-button" id="signOutBtn" type="button">登出</button>
+            </div>
+
+            <div class="section-label">同步操作</div>
+            <div class="button-row">
+              <button class="primary-button" id="uploadCloudBtn" type="button">上傳到雲端</button>
+              <button class="ghost-button" id="downloadCloudBtn" type="button">從雲端下載</button>
+            </div>
+            <div id="cloudSummary" class="summary-list"></div>
+          </article>
+        </section>
+      </main>
+    </div>
+
+    <nav class="mobile-bottom-nav" aria-label="手機快速導覽">
+      <button class="nav-link mobile-nav-link active" data-section="dashboard">首頁</button>
+      <button class="nav-link mobile-nav-link mobile-nav-primary" data-section="water">新增測量</button>
+      <button class="nav-link mobile-nav-link" data-section="history">歷史</button>
+      <button class="nav-link mobile-nav-link" data-section="tank">設定</button>
+    </nav>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script type="module" src="./app.module.js?v=20260521-personal-polish"></script>
+  </body>
+</html>
