@@ -1,5 +1,6 @@
 import { DEFAULT_DOSING, mergeDosing } from "../modules/dosingModule.js";
 import { DEFAULT_TANK } from "../modules/tankModule.js";
+import { splitActiveAndArchivedRecords } from "./retentionService.js";
 import { clone, createId, loadJson, saveJson } from "./storageService.js";
 
 export function createTankStore({ storageKey, onChange = () => {}, onDosingDebug = null, onPersist = () => {}, onPersistError = () => {} }) {
@@ -39,6 +40,7 @@ export function createTankStore({ storageKey, onChange = () => {}, onDosingDebug
       tank: overrides.tank || { name: overrides.name || DEFAULT_TANK.name },
       dosing: overrides.dosing,
       records: overrides.records,
+      archivedRecords: overrides.archivedRecords,
       maintenance: overrides.maintenance,
       doseApplications: overrides.doseApplications,
       livestock: overrides.livestock,
@@ -51,6 +53,10 @@ export function createTankStore({ storageKey, onChange = () => {}, onDosingDebug
   }
 
   function mergeTankData(stored = {}) {
+    const retained = splitActiveAndArchivedRecords({
+      activeRecords: Array.isArray(stored.records) ? stored.records : [],
+      archivedRecords: Array.isArray(stored.archivedRecords) ? stored.archivedRecords : [],
+    });
     return {
       id: stored.id || createId(),
       tank: {
@@ -73,7 +79,8 @@ export function createTankStore({ storageKey, onChange = () => {}, onDosingDebug
           ...((stored.dosing && stored.dosing.status) || {}),
         },
       },
-      records: Array.isArray(stored.records) ? stored.records : [],
+      records: retained.activeRecords,
+      archivedRecords: retained.archivedRecords,
       maintenance: Array.isArray(stored.maintenance) ? stored.maintenance : [],
       doseApplications: Array.isArray(stored.doseApplications) ? stored.doseApplications : [],
       livestock: Array.isArray(stored.livestock) ? stored.livestock : [],
@@ -94,6 +101,7 @@ export function createTankStore({ storageKey, onChange = () => {}, onDosingDebug
         tank: tank.tank,
         dosing: tank.dosing,
         records: tank.records,
+        archivedRecords: tank.archivedRecords || [],
         maintenance: tank.maintenance,
         doseApplications: tank.doseApplications || [],
         livestock: tank.livestock || [],
@@ -135,6 +143,7 @@ export function createTankStore({ storageKey, onChange = () => {}, onDosingDebug
     getTargets: () => getActiveTank().tank.targets,
     getDosing: () => getActiveTank().dosing,
     getMeasurements: () => getActiveTank().records,
+    getArchivedMeasurements: () => getActiveTank().archivedRecords || [],
     getMaintenance: () => getActiveTank().maintenance,
     getDoseApplications: () => getActiveTank().doseApplications,
     getLivestock: () => getActiveTank().livestock,
@@ -179,7 +188,9 @@ export function createTankStore({ storageKey, onChange = () => {}, onDosingDebug
       notify({ forms: true });
     },
     addMeasurement(record) {
-      getActiveTank().records.push({ id: createId(), createdAt: new Date().toISOString(), ...record });
+      const tankData = getActiveTank();
+      tankData.records.push({ id: createId(), createdAt: new Date().toISOString(), ...record });
+      runRetentionCleanupForTank(tankData);
       persist();
       notify({ forms: true });
     },
@@ -198,21 +209,24 @@ export function createTankStore({ storageKey, onChange = () => {}, onDosingDebug
 
       if (sameDateRecords.length) {
         const existing = sameDateRecords[sameDateRecords.length - 1].item;
-        tankData.records = tankData.records.filter((item) => item.date !== record.date);
-        tankData.records.push({
+        const updatedRecord = {
           ...existing,
           ...record,
           id: existing.id,
           createdAt: existing.createdAt || now,
           updatedAt: now,
-        });
+        };
+        tankData.records = tankData.records.filter((item) => item.date !== record.date);
+        tankData.records.push(updatedRecord);
+        runRetentionCleanupForTank(tankData);
         persist();
         notify({ forms: true });
-        return { mode: "updated", record: tankData.records[tankData.records.length - 1] };
+        return { mode: "updated", record: updatedRecord };
       }
 
       const createdRecord = { id: createId(), createdAt: now, ...record };
       tankData.records.push(createdRecord);
+      runRetentionCleanupForTank(tankData);
       persist();
       notify({ forms: true });
       return { mode: "created", record: createdRecord };
@@ -325,6 +339,20 @@ export function createTankStore({ storageKey, onChange = () => {}, onDosingDebug
       persist();
       notify({ forms: false });
     },
+    runRetentionCleanup() {
+      const result = runRetentionCleanupForAllTanks();
+      persist();
+      notify({ forms: true });
+      return result;
+    },
+    clearArchivedMeasurements() {
+      const tankData = getActiveTank();
+      const deletedCount = (tankData.archivedRecords || []).length;
+      tankData.archivedRecords = [];
+      persist();
+      notify({ forms: true });
+      return { deletedCount };
+    },
     updateTargets(targets, targetInputs) {
       const tank = getActiveTank().tank;
       tank.targets = { ...tank.targets, ...targets };
@@ -334,6 +362,7 @@ export function createTankStore({ storageKey, onChange = () => {}, onDosingDebug
     },
     replaceState(nextState) {
       state = mergeState(nextState);
+      runRetentionCleanupForAllTanks();
       persist();
       notify({ forms: true, cloud: true });
     },
@@ -343,4 +372,21 @@ export function createTankStore({ storageKey, onChange = () => {}, onDosingDebug
       notify({ forms: true, cloud: true });
     },
   };
+
+  function runRetentionCleanupForTank(tankData) {
+    const retained = splitActiveAndArchivedRecords({
+      activeRecords: tankData.records || [],
+      archivedRecords: tankData.archivedRecords || [],
+    });
+    tankData.records = retained.activeRecords;
+    tankData.archivedRecords = retained.archivedRecords;
+    return retained;
+  }
+
+  function runRetentionCleanupForAllTanks() {
+    return state.tanks.map((tankData) => ({
+      tankId: tankData.id,
+      ...runRetentionCleanupForTank(tankData),
+    }));
+  }
 }

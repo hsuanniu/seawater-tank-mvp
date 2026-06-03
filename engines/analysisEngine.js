@@ -2,12 +2,19 @@ import { getDoseStatus } from "../modules/dosingModule.js";
 import { daysBetweenRecords, latestRecords } from "../modules/measurementModule.js";
 import { PARAMETERS } from "../modules/tankModule.js";
 import { toNumber } from "../services/formatService.js";
-import { calculateDosingRecommendation, classify, trend } from "./safetyEngine.js?v=20260520-safety-ux";
+import { buildRecoveryContext, recoveryContextForElement } from "./eventRecoveryEngine.js";
+import { calculateDosingRecommendation, classify, trend } from "./safetyEngine.js?v=20260603-event-recovery";
 
-export function analyzeTank({ tank, records, dosing }) {
+export function analyzeTank({ tank, records, dosing, events = [] }) {
   const { latest, previous } = latestRecords(records);
   if (!latest) return null;
   const intervalDays = daysBetweenRecords(latest, previous);
+  const recoveryContext = buildRecoveryContext({
+    events,
+    latestDate: latest.date,
+    records,
+    targets: tank.targets,
+  });
 
   const rows = PARAMETERS.map((param) => {
     const value = toNumber(latest[param.key]);
@@ -22,6 +29,7 @@ export function analyzeTank({ tank, records, dosing }) {
     const trendText = isMeasured ? trend(value, previousValue, param.tolerance) : "沿用上次";
     const currentDose = param.doseKey ? toNumber(dosing[param.doseKey]) : null;
     const doseStatus = param.doseKey ? getDoseStatus(dosing, param.doseKey) : null;
+    const elementRecoveryContext = recoveryContextForElement(recoveryContext, param.key);
     let recommendation = calculateDosingRecommendation({
       parameter: param.key,
       currentValue: value,
@@ -33,6 +41,7 @@ export function analyzeTank({ tank, records, dosing }) {
       doseStatus: doseStatus || { enabled: true, pausedDays: 0 },
       statusCode: status.code,
       trendText,
+      recoveryContext: elementRecoveryContext,
     });
     if (!isMeasured) {
       recommendation = {
@@ -45,6 +54,12 @@ export function analyzeTank({ tank, records, dosing }) {
         canApply: false,
         dailyDelta: null,
         confidenceLevel: "INSUFFICIENT",
+        confidence_score: "low",
+        event_recovery_mode: Boolean(elementRecoveryContext.event_recovery_mode),
+        affected_element: elementRecoveryContext.affected_element || null,
+        warning_message: elementRecoveryContext.event_recovery_mode
+          ? "本項目這次未測量，且目前處於設備恢復期；不使用沿用值建立新趨勢。"
+          : "",
       };
     }
     const isDosePaused = doseStatus ? !doseStatus.enabled || doseStatus.pausedDays > 0 : false;
@@ -84,10 +99,16 @@ export function analyzeTank({ tank, records, dosing }) {
       reasonCode: recommendation.reasonCode,
       safetyWarnings: recommendation.safetyWarnings,
       confidenceLevel: recommendation.confidenceLevel,
+      confidence_score: recommendation.confidence_score,
       canApplyRecommendation: recommendation.canApply,
       dailyDelta: recommendation.dailyDelta,
       trendTooFast: recommendation.trendTooFast,
       trendSpeedText: recommendation.trendSpeedText,
+      recommended_dosing: recommendation.recommended_dosing,
+      adjustment_percentage: recommendation.adjustment_percentage,
+      event_recovery_mode: recommendation.event_recovery_mode,
+      affected_element: recommendation.affected_element,
+      warning_message: recommendation.warning_message,
     };
   });
 
@@ -95,6 +116,7 @@ export function analyzeTank({ tank, records, dosing }) {
     latest,
     previous,
     daysSincePrevious: intervalDays,
+    recoveryContext,
     rows,
   };
 }

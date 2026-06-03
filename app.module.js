@@ -1,10 +1,10 @@
 import { nutrientFocusText, nutrientNotes } from "./components/aiExplanationModule.js";
 import { actionText, changeText, confidenceText, dailyDeltaText, doseSuggestionText, formatDoseSentence, primaryFocus } from "./components/dashboardModule.js?v=20260520-safety-ux";
-import { analyzeTank } from "./engines/analysisEngine.js?v=20260520-safety-ux";
+import { analyzeTank } from "./engines/analysisEngine.js?v=20260603-event-recovery";
 import { additiveLabel, normalizeAdditiveLog } from "./modules/additiveLogModule.js?v=20260520-additive-feeding-log2";
 import { analyzeBioLoadReferences, WEEKDAYS } from "./modules/bioLoadModule.js?v=20260520-additive-feeding-log2";
 import { APPLICABLE_DOSE_KEYS, createDoseApplicationEntry, getDoseStatus as readDoseStatus } from "./modules/dosingModule.js?v=20260521-stability-tests";
-import { buildTimelineEvents, filterTimelineEvents, TIMELINE_EVENT_TYPES } from "./modules/eventTimelineModule.js?v=20260521-event-timeline";
+import { buildTimelineEvents, filterTimelineEvents, TIMELINE_EVENT_TYPES } from "./modules/eventTimelineModule.js?v=20260603-mobile-first";
 import { foodLabel, normalizeFeedingLog } from "./modules/feedingLogModule.js?v=20260520-additive-feeding-log2";
 import { buildMeasurementRecord, getSortedRecords as sortMeasurements } from "./modules/measurementModule.js?v=20260521-stability-tests";
 import { DEFAULT_TANK, PARAMETERS, parseTargetExpression } from "./modules/tankModule.js";
@@ -15,6 +15,11 @@ import { createTankStore } from "./services/tankStore.js";
 const STORAGE_KEY = "seawaterTankMvp.v4";
 const CLOUD_CONFIG_KEY = "seawaterTankCloudConfig.v1";
 const CLOUD_TABLE = "user_app_state";
+const APP_VERSION_STORAGE_KEY = "seawaterTankAppVersion.v1";
+const FALLBACK_VERSION = {
+  current_version: "2026.06.03-pwa-refresh",
+  build_time: "2026-06-03T00:00:00+08:00",
+};
 const DEBUG_MODE = false;
 let supabaseClient = null;
 let cloudSession = null;
@@ -22,6 +27,7 @@ let cloudSaveTimer = null;
 let suppressCloudSave = false;
 let dosingAutoSaveTimer = null;
 let feedbackTimer = null;
+let historyMode = "active";
 
 const TankStore = createTankStore({
   storageKey: STORAGE_KEY,
@@ -58,6 +64,10 @@ function measurements() {
   return TankStore.getMeasurements();
 }
 
+function archivedMeasurements() {
+  return TankStore.getArchivedMeasurements();
+}
+
 function livestock() {
   return TankStore.getLivestock();
 }
@@ -72,6 +82,83 @@ function additives() {
 
 function additiveSchedules() {
   return TankStore.getAdditiveSchedules();
+}
+
+function systemEvents() {
+  return TankStore.getEvents();
+}
+
+function formatBuildTime(value) {
+  if (!value) return "未知";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString("zh-Hant", { hour12: false });
+}
+
+function renderVersionPanel(version, { updateAvailable = false } = {}) {
+  const panel = document.querySelector("#versionPanel");
+  if (!panel) return;
+  const currentVersion = version?.current_version || FALLBACK_VERSION.current_version;
+  const buildTime = version?.build_time || FALLBACK_VERSION.build_time;
+  panel.classList.toggle("update-available", updateAvailable);
+  panel.innerHTML = updateAvailable
+    ? `
+      <span>發現新版本 ${escapeHtml(currentVersion)}｜${escapeHtml(formatBuildTime(buildTime))}</span>
+      <button class="version-refresh-button" type="button" id="versionRefreshBtn">重新整理</button>
+    `
+    : `<span>版本 ${escapeHtml(currentVersion)}｜更新 ${escapeHtml(formatBuildTime(buildTime))}</span>`;
+  const refreshButton = document.querySelector("#versionRefreshBtn");
+  if (refreshButton) refreshButton.addEventListener("click", () => refreshToLatestVersion());
+}
+
+async function clearAppCaches() {
+  if (!("caches" in window)) return;
+  const keys = await caches.keys();
+  await Promise.all(keys.filter((key) => key.startsWith("seawater-tank-mvp")).map((key) => caches.delete(key)));
+}
+
+async function refreshToLatestVersion() {
+  try {
+    await clearAppCaches();
+    if (navigator.serviceWorker?.controller) {
+      navigator.serviceWorker.controller.postMessage({ type: "SKIP_WAITING" });
+    }
+  } finally {
+    window.location.reload();
+  }
+}
+
+async function checkAppVersion() {
+  renderVersionPanel(FALLBACK_VERSION);
+  try {
+    const response = await fetch(`version.json?ts=${Date.now()}`, {
+      cache: "no-store",
+      headers: { "Cache-Control": "no-cache" },
+    });
+    if (!response.ok) throw new Error("version unavailable");
+    const version = await response.json();
+    const previousVersion = localStorage.getItem(APP_VERSION_STORAGE_KEY);
+    const currentVersion = version.current_version || FALLBACK_VERSION.current_version;
+    const hasKnownVersion = Boolean(previousVersion);
+    const updateAvailable = hasKnownVersion && previousVersion !== currentVersion;
+    renderVersionPanel(version, { updateAvailable });
+    localStorage.setItem(APP_VERSION_STORAGE_KEY, currentVersion);
+    if (updateAvailable) showToast("偵測到新版本，請重新整理。");
+  } catch {
+    renderVersionPanel(FALLBACK_VERSION);
+  }
+}
+
+function setupServiceWorkerUpdates() {
+  if (!("serviceWorker" in navigator)) return;
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    showToast("新版已準備好，重新開啟後會套用。");
+  });
+}
+
+function onClick(selector, handler) {
+  const element = document.querySelector(selector);
+  if (element) element.addEventListener("click", handler);
 }
 
 function debugDosingSync({ source, input, previous, updated }) {
@@ -162,6 +249,7 @@ function analyze() {
     tank: tankSettings(),
     records: measurements(),
     dosing: dosingSettings(),
+    events: systemEvents(),
   });
 }
 
@@ -226,6 +314,7 @@ function buildMeasurementSnapshot(record) {
     tank: tankSettings(),
     records: recordsWithPendingMeasurement(record),
     dosing: dosingSettings(),
+    events: systemEvents(),
   });
   return {
     createdAt: new Date().toISOString(),
@@ -846,11 +935,21 @@ function renderAnalysis() {
 
 function renderHistory() {
   const body = document.querySelector("#historyBody");
-  const sortedRecords = getSortedRecords();
+  const activeRecords = getSortedRecords();
+  const archiveRecords = sortMeasurements(archivedMeasurements());
+  const sortedRecords = historyMode === "archive" ? archiveRecords : activeRecords;
   const previousById = new Map(sortedRecords.map((record, index) => [record.id, sortedRecords[index - 1] || null]));
   const records = [...sortedRecords].reverse();
   const meta = document.querySelector("#historyMeta");
-  if (meta) meta.textContent = `目前 ${records.length} 筆水質紀錄`;
+  const toggleArchiveBtn = document.querySelector("#toggleArchiveBtn");
+  const clearArchiveBtn = document.querySelector("#clearArchiveBtn");
+  if (meta) {
+    meta.textContent = historyMode === "archive"
+      ? `封存 ${records.length} 筆｜主要紀錄 ${activeRecords.length} 筆`
+      : `主要紀錄 ${records.length} 筆｜封存 ${archiveRecords.length} 筆`;
+  }
+  if (toggleArchiveBtn) toggleArchiveBtn.textContent = historyMode === "archive" ? "查看主要" : "查看封存";
+  if (clearArchiveBtn) clearArchiveBtn.disabled = archiveRecords.length === 0;
   const valueCell = (record, key) => {
     const previous = previousById.get(record.id);
     const reallyCarried = record.measuredFields
@@ -868,25 +967,33 @@ function renderHistory() {
           (record) => {
             const snapshot = record.snapshot;
             return `
-            <tr>
-              <td>${record.date}</td>
-              <td>${valueCell(record, "kh")}</td>
-              <td>${valueCell(record, "ca")}</td>
-              <td>${valueCell(record, "mg")}</td>
-              <td>${valueCell(record, "k")}</td>
-              <td>${valueCell(record, "no3")}</td>
-              <td>${valueCell(record, "po4")}</td>
-              <td>${record.salinity || "-"}</td>
-              <td>${record.temperature || "-"}</td>
-              <td>${record.note || "-"}</td>
-              <td>${contextCell(record)}</td>
-            </tr>
+            <article class="history-record-card">
+              <div class="history-record-head">
+                <div>
+                  <strong>${escapeHtml(record.date)}</strong>
+                  <span>${historyMode === "archive" ? "封存紀錄" : "主要紀錄"}｜${record.note ? escapeHtml(record.note) : "無備註"}</span>
+                </div>
+                ${contextCell(record)}
+              </div>
+              <div class="history-metric-grid">
+                <div><span>KH</span><strong>${escapeHtml(valueCell(record, "kh"))}</strong></div>
+                <div><span>CA</span><strong>${escapeHtml(valueCell(record, "ca"))}</strong></div>
+                <div><span>MG</span><strong>${escapeHtml(valueCell(record, "mg"))}</strong></div>
+                <div><span>鉀(K)</span><strong>${escapeHtml(valueCell(record, "k"))}</strong></div>
+                <div><span>NO3</span><strong>${escapeHtml(valueCell(record, "no3"))}</strong></div>
+                <div><span>PO4</span><strong>${escapeHtml(valueCell(record, "po4"))}</strong></div>
+              </div>
+              <div class="history-meta-row">
+                <span>鹽度 ${escapeHtml(record.salinity || "-")}</span>
+                <span>水溫 ${escapeHtml(record.temperature || "-")}</span>
+              </div>
+            </article>
             ${snapshot ? historyContextRow(record) : ""}
           `;
           },
         )
         .join("")
-    : `<tr><td colspan="11">尚未有紀錄。</td></tr>`;
+    : `<div class="notice">${historyMode === "archive" ? "目前沒有封存紀錄。" : "尚未有主要紀錄。"}</div>`;
   renderEventTimeline();
 }
 
@@ -964,18 +1071,16 @@ function historyContextRow(record) {
     : "近 7 天無添加物紀錄";
 
   return `
-    <tr class="history-context-row" data-history-context="${escapeHtml(record.id)}" hidden>
-      <td colspan="11">
-        <div class="history-context-card">
-          <div><strong>當時滴定量</strong><span>${doseText}</span></div>
-          <div><strong>當時系統建議</strong><span>${escapeHtml(recommendationText)}</span></div>
-          <div><strong>是否套用</strong><span>${escapeHtml(appliedText)}</span></div>
-          <div><strong>維護事件</strong><span>${escapeHtml(maintenanceText)}</span></div>
-          <div><strong>餵食脈絡</strong><span>${escapeHtml(feedingText)}</span></div>
-          <div><strong>添加物脈絡</strong><span>${escapeHtml(additiveText)}</span></div>
-        </div>
-      </td>
-    </tr>
+    <div class="history-context-row" data-history-context="${escapeHtml(record.id)}" hidden>
+      <div class="history-context-card">
+        <div><strong>當時滴定量</strong><span>${doseText}</span></div>
+        <div><strong>當時系統建議</strong><span>${escapeHtml(recommendationText)}</span></div>
+        <div><strong>是否套用</strong><span>${escapeHtml(appliedText)}</span></div>
+        <div><strong>維護事件</strong><span>${escapeHtml(maintenanceText)}</span></div>
+        <div><strong>餵食脈絡</strong><span>${escapeHtml(feedingText)}</span></div>
+        <div><strong>添加物脈絡</strong><span>${escapeHtml(additiveText)}</span></div>
+      </div>
+    </div>
   `;
 }
 
@@ -1214,6 +1319,16 @@ function renderCloudStatus() {
 function renderCloudUi() {
   renderCloudConfig();
   renderCloudStatus();
+}
+
+function downloadJsonFile(filename, payload) {
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
 }
 
 function scheduleCloudSave() {
@@ -1612,15 +1727,22 @@ function setupEvents() {
   document.querySelector("#timelineTypeFilter").addEventListener("change", renderEventTimeline);
 
   document.querySelector("#exportBtn").addEventListener("click", (event) => {
-    const blob = new Blob([JSON.stringify(TankStore.serializeState(), null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `seawater-tank-${todayText()}.json`;
-    link.click();
-    URL.revokeObjectURL(url);
+    downloadJsonFile(`seawater-tank-${todayText()}.json`, TankStore.serializeState());
     showSavedFeedback(event.currentTarget, "已備份");
     showToast("備份檔已下載，請保留在你找得到的位置。");
+  });
+
+  onClick("#exportAllRecordsBtn", (event) => {
+    const tank = activeTank();
+    downloadJsonFile(`seawater-tank-all-records-${todayText()}.json`, {
+      exportedAt: new Date().toISOString(),
+      tankId: tank.id,
+      tank: tank.tank,
+      active_history: tank.records || [],
+      archived_history: tank.archivedRecords || [],
+    });
+    showSavedFeedback(event.currentTarget, "已匯出");
+    showToast("主要與封存紀錄已匯出。");
   });
 
   document.querySelector("#importInput").addEventListener("change", async (event) => {
@@ -1653,16 +1775,50 @@ function setupEvents() {
     TankStore.clear();
     showToast("資料已清除");
   });
+
+  onClick("#toggleArchiveBtn", () => {
+    historyMode = historyMode === "archive" ? "active" : "archive";
+    renderHistory();
+  });
+
+  onClick("#clearArchiveBtn", () => {
+    const count = archivedMeasurements().length;
+    if (!count) {
+      showToast("目前沒有封存紀錄。");
+      return;
+    }
+    if (!confirm(`確定要永久刪除 ${count} 筆封存紀錄？\n\n主要紀錄不會被刪除，但封存資料刪除後無法復原。`)) return;
+    const result = TankStore.clearArchivedMeasurements();
+    historyMode = "active";
+    showToast(`已清除 ${result.deletedCount} 筆封存紀錄。`);
+  });
 }
 
+setupServiceWorkerUpdates();
+checkAppVersion();
 setupEvents();
+TankStore.runRetentionCleanup();
 renderAll();
 initSupabaseClient();
 refreshCloudSession();
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("sw.js").catch(() => {
+    navigator.serviceWorker.register("sw.js").then((registration) => {
+      registration.update().catch(() => {});
+      if (registration.waiting) {
+        registration.waiting.postMessage({ type: "SKIP_WAITING" });
+      }
+      registration.addEventListener("updatefound", () => {
+        const worker = registration.installing;
+        if (!worker) return;
+        worker.addEventListener("statechange", () => {
+          if (worker.state === "installed" && navigator.serviceWorker.controller) {
+            showToast("新版本已下載，重新開啟 App 後會套用。");
+          }
+        });
+      });
+    }).catch(() => {
       // PWA registration is optional; the app still works as a normal website.
     });
   });

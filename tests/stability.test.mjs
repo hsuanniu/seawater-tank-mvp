@@ -141,6 +141,101 @@ test("Safety Engine gives only conservative reminders outside KH, CA, and MG saf
   }
 });
 
+test("Event recovery mode keeps CA tube repair rises conservative and below high confidence", () => {
+  const analysis = analyzeTank({
+    tank: DEFAULT_TANK,
+    records: [
+      completeMeasurement({ id: "before", date: "2026-05-16", ca: 395 }),
+      completeMeasurement({ id: "after", date: "2026-05-23", ca: 440 }),
+    ],
+    dosing: { kh: 6, ca: 5.5, mg: 20, status: {} },
+    events: [{
+      id: "event-ca-fixed",
+      event_type: "CA_tube_air_leak_fixed",
+      affected_element: "CA",
+      start_date: "2026-05-23",
+      recovery_days: 14,
+    }],
+  });
+  const ca = analysis.rows.find((row) => row.key === "ca");
+
+  assert.equal(ca.event_recovery_mode, true);
+  assert.equal(ca.affected_element, "ca");
+  assert.equal(ca.confidence_score === "low" || ca.confidence_score === "medium", true);
+  assert.notEqual(ca.confidence_score, "high");
+  assert.equal(ca.reasonCode, "CA_RECOVERY_RISE_SMALL_REDUCE");
+  assert.equal(ca.doseChange, -0.1);
+  assert.equal(Math.abs(ca.adjustment_percentage) <= 2, true);
+  assert.match(ca.warning_message, /長期消耗趨勢/);
+});
+
+test("KH low but already rising observes instead of increasing aggressively", () => {
+  const result = calculateDosingRecommendation(dosingInput("kh", {
+    currentValue: 7.8,
+    previousValue: 7.5,
+    statusCode: classify(7.8, DEFAULT_TANK.targets.kh, "kh").code,
+    trendText: "上升",
+  }));
+
+  assert.equal(result.reasonCode, "KH_LOW_BUT_RISING_OBSERVE");
+  assert.equal(result.canApply, false);
+  assert.equal(result.doseChangeMlPerDay, 0);
+});
+
+test("MG recovery mode limits changes to one percent and stays below high confidence", () => {
+  const result = calculateDosingRecommendation(dosingInput("mg", {
+    currentValue: 1400,
+    previousValue: 1370,
+    currentDoseMlPerDay: 20,
+    statusCode: classify(1400, DEFAULT_TANK.targets.mg, "mg").code,
+    trendText: "上升",
+    recoveryContext: {
+      event_recovery_mode: true,
+      affected_element: "mg",
+      event_type: "MG_tube_replaced",
+    },
+  }));
+
+  assert.equal(result.event_recovery_mode, true);
+  assert.equal(result.confidence_score === "low" || result.confidence_score === "medium", true);
+  assert.notEqual(result.confidence_score, "high");
+  assert.equal(result.doseChangeMlPerDay, -0.2);
+  assert.equal(Math.abs(result.adjustment_percentage) <= 1, true);
+});
+
+test("NO3 recovering inside target range stays observe-only and avoids aggressive nutrient advice", () => {
+  const result = calculateDosingRecommendation(dosingInput("no3", {
+    currentValue: 0.5,
+    previousValue: 0.01,
+    targetRange: DEFAULT_TANK.targets.no3,
+    currentDoseMlPerDay: 0,
+    statusCode: classify(0.5, DEFAULT_TANK.targets.no3, "no3").code,
+    trendText: "上升",
+  }));
+
+  assert.equal(result.reasonCode, "NO3_RECOVERING_IN_SAFE_RANGE");
+  assert.equal(result.canApply, false);
+  assert.equal(result.doseChangeMlPerDay, 0);
+  assert.match(result.reasonText, /優先觀察/);
+});
+
+test("Tank Store records recovery events without breaking existing tank data", () => {
+  useStorage();
+  const store = createStore("recovery-event");
+  store.addEvent({
+    event_type: "CA_tube_air_leak_fixed",
+    affected_element: "CA",
+    start_date: "2026-05-23",
+    recovery_days: 14,
+  });
+  const event = store.serializeState().tanks[0].events[0];
+
+  assert.equal(event.event_type, "CA_tube_air_leak_fixed");
+  assert.equal(event.affected_element, "CA");
+  assert.equal(event.recovery_days, 14);
+  assert.equal(store.serializeState().tanks[0].records.length, 0);
+});
+
 test("Measurement Store updates same-date records instead of creating duplicates", () => {
   useStorage();
   const store = createStore("same-date");
@@ -152,6 +247,74 @@ test("Measurement Store updates same-date records instead of creating duplicates
   assert.equal(store.getMeasurements().length, 1);
   assert.equal(store.getMeasurements()[0].id, first.record.id);
   assert.equal(store.getMeasurements()[0].kh, 8.6);
+});
+
+test("Retention cleanup moves records older than six months into archive", () => {
+  useStorage();
+  const store = createStore("retention-six-months");
+  store.upsertMeasurementByDate(completeMeasurement({ date: "2025-11-20", kh: 7.9 }));
+  store.upsertMeasurementByDate(completeMeasurement({ date: "2026-05-21", kh: 8.4 }));
+
+  assert.equal(store.getMeasurements().length, 1);
+  assert.equal(store.getMeasurements()[0].date, "2026-05-21");
+  assert.equal(store.getArchivedMeasurements().length, 1);
+  assert.equal(store.getArchivedMeasurements()[0].date, "2025-11-20");
+});
+
+test("Retention cleanup keeps at most fifty active records and archives the older overflow", () => {
+  useStorage();
+  const store = createStore("retention-fifty");
+  for (let index = 1; index <= 55; index += 1) {
+    const date = new Date(Date.UTC(2026, 3, index)).toISOString().slice(0, 10);
+    store.upsertMeasurementByDate(completeMeasurement({ date, kh: 8 + index / 100 }));
+  }
+
+  assert.equal(store.getMeasurements().length, 50);
+  assert.equal(store.getArchivedMeasurements().length, 5);
+  assert.equal(store.getMeasurements()[0].date, "2026-04-06");
+  assert.equal(store.getArchivedMeasurements()[0].date, "2026-04-01");
+});
+
+test("Archived records do not participate in dosing analysis", () => {
+  useStorage();
+  const store = createStore("archive-not-analysis");
+  store.replaceState({
+    version: 3,
+    activeTankId: "tank-1",
+    tanks: [{
+      id: "tank-1",
+      tank: DEFAULT_TANK,
+      dosing: { kh: 6, ca: 5, mg: 1, status: {} },
+      records: [
+        completeMeasurement({ id: "active-1", date: "2026-05-01", kh: 8.2 }),
+        completeMeasurement({ id: "active-2", date: "2026-05-08", kh: 8.3 }),
+      ],
+      archivedRecords: [
+        completeMeasurement({ id: "archived-future", date: "2026-06-01", kh: 10.5 }),
+      ],
+      maintenance: [],
+    }],
+  });
+  const analysis = analyzeTank({
+    tank: store.getTank(),
+    records: store.getMeasurements(),
+    dosing: store.getDosing(),
+  });
+
+  assert.equal(analysis.latest.id, "active-2");
+  assert.equal(analysis.latest.kh, 8.3);
+});
+
+test("Archived records remain until the user explicitly clears archive", () => {
+  useStorage();
+  const store = createStore("clear-archive");
+  store.upsertMeasurementByDate(completeMeasurement({ date: "2025-11-20" }));
+  assert.equal(store.getArchivedMeasurements().length, 1);
+
+  const result = store.clearArchivedMeasurements();
+
+  assert.equal(result.deletedCount, 1);
+  assert.equal(store.getArchivedMeasurements().length, 0);
 });
 
 test("Tank Store keeps the final tank and refuses destructive deletion", () => {

@@ -7,7 +7,7 @@
     <meta name="theme-color" content="#0b2f48" />
     <link rel="manifest" href="manifest.webmanifest" />
     <link rel="apple-touch-icon" href="icons/icon-192.svg" />
-    <link rel="stylesheet" href="styles.css?v=20260521-delete-tank" />
+    <link rel="stylesheet" href="styles.css?v=20260603-pwa-refresh" />
   </head>
   <body>
     <div class="app-shell">
@@ -55,6 +55,9 @@
           </div>
         </header>
         <div id="appFeedback" class="app-feedback" role="status" aria-live="polite"></div>
+        <div id="versionPanel" class="version-panel" aria-live="polite">
+          <span>版本檢查中</span>
+        </div>
 
         <section id="dashboard" class="page active">
           <div id="focusPanel" class="focus-panel"></div>
@@ -388,6 +391,7 @@
                   <option value="feeding">餵食</option>
                   <option value="additive">添加物</option>
                   <option value="fish">魚隻</option>
+                  <option value="system-event">系統事件</option>
                 </select>
               </label>
             </div>
@@ -399,28 +403,14 @@
                 <h3>歷史紀錄</h3>
                 <p id="historyMeta" class="panel-subtitle">目前 0 筆</p>
               </div>
-              <button class="danger-button" id="clearBtn">清除所有資料</button>
+              <div class="history-actions">
+                <button class="ghost-button" id="toggleArchiveBtn" type="button">查看封存</button>
+                <button class="ghost-button" id="exportAllRecordsBtn" type="button">匯出全部紀錄</button>
+                <button class="danger-button" id="clearArchiveBtn" type="button">清除封存</button>
+                <button class="danger-button" id="clearBtn" type="button">清除所有資料</button>
+              </div>
             </div>
-            <div class="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>日期</th>
-                    <th>KH</th>
-                    <th>CA</th>
-                    <th>MG</th>
-                    <th>鉀(K)</th>
-                    <th>NO3</th>
-                    <th>PO4</th>
-                    <th>鹽度</th>
-                    <th>水溫</th>
-                    <th>備註</th>
-                    <th>脈絡</th>
-                  </tr>
-                </thead>
-                <tbody id="historyBody"></tbody>
-              </table>
-            </div>
+            <div id="historyBody" class="history-list"></div>
           </article>
         </section>
 
@@ -489,7 +479,7 @@
     </nav>
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script type="module" src="app.module.js?v=20260521-delete-tank"></script>
-    <script defer src="app.js?v=20260521-delete-tank"></script>
+    <script type="module" src="app.module.js?v=20260603-pwa-refresh"></script>
+    <script defer src="app.js?v=20260603-pwa-refresh"></script>
   </body>
 </html>

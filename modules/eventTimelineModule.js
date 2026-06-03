@@ -9,6 +9,7 @@ export const TIMELINE_EVENT_TYPES = [
   { value: "feeding", label: "餵食" },
   { value: "additive", label: "添加物" },
   { value: "fish", label: "魚隻" },
+  { value: "system-event", label: "系統事件" },
 ];
 
 function eventId(prefix, id, suffix = "") {
@@ -160,6 +161,26 @@ function fishEvents(tankId, livestock = []) {
   });
 }
 
+function systemEvents(tankId, events = []) {
+  return events.map((event) => createTimelineEvent({
+    id: eventId("system", event.id),
+    tankId,
+    type: "system-event",
+    date: event.start_date || event.event_start_date || event.date || String(event.createdAt || "").slice(0, 10),
+    title: event.title || event.event_type || event.eventType || "系統事件",
+    summary: event.summary || `${event.affected_element || event.affectedElement || event.element || "未指定元素"}｜恢復期 ${event.recovery_days ?? event.expected_recovery_days ?? event.recoveryDays ?? 14} 天`,
+    relatedRecordId: event.relatedRecordId || null,
+    metadata: {
+      event_type: event.event_type || event.eventType || event.type || "",
+      affected_element: event.affected_element || event.affectedElement || event.element || "",
+      start_date: event.start_date || event.event_start_date || event.startDate || event.date || "",
+      recovery_days: event.recovery_days ?? event.expected_recovery_days ?? event.recoveryDays ?? 14,
+      event_recovery_mode: event.event_recovery_mode === true || event.recoveryMode === true,
+      note: event.note || "",
+    },
+  }));
+}
+
 export function buildTimelineEvents(tankData) {
   if (!tankData) return [];
   const events = [
@@ -169,6 +190,7 @@ export function buildTimelineEvents(tankData) {
     ...feedingEvents(tankData.id, tankData.feedings),
     ...additiveEvents(tankData.id, tankData.additives),
     ...fishEvents(tankData.id, tankData.livestock),
+    ...systemEvents(tankData.id, tankData.events),
   ];
 
   return events
