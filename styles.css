@@ -295,6 +295,313 @@ button {
   color: #fff;
 }
 
+.sop-start-button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 56px;
+  padding: 12px 14px;
+  border: 1px solid rgba(14, 120, 148, 0.28);
+  border-radius: 10px;
+  background: #eaf6f8;
+  color: #0b657d;
+  text-align: left;
+  font-size: 15px;
+  font-weight: 850;
+}
+
+.sop-start-button small {
+  color: #55737f;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.measurement-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 8px;
+  min-width: 0;
+}
+
+.measurement-field label {
+  min-width: 0;
+}
+
+.measurement-method-button {
+  min-height: 44px;
+  padding: 8px 10px;
+  border: 1px solid #bcd8df;
+  border-radius: 8px;
+  background: #fff;
+  color: #0e7894;
+  font-size: 12px;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+body.sop-open {
+  overflow: hidden;
+}
+
+.measurement-sop-root {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+}
+
+.sop-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(6, 26, 37, 0.7);
+  backdrop-filter: blur(5px);
+}
+
+.sop-sheet {
+  position: absolute;
+  right: 50%;
+  bottom: 18px;
+  display: flex;
+  width: min(560px, calc(100vw - 28px));
+  max-height: min(780px, calc(100dvh - 36px));
+  flex-direction: column;
+  overflow: hidden;
+  transform: translateX(50%);
+  border: 1px solid rgba(196, 218, 225, 0.9);
+  border-radius: 18px;
+  background: #f7fbfc;
+  box-shadow: 0 28px 80px rgba(4, 29, 42, 0.36);
+}
+
+.sop-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 18px 13px;
+  background: #fff;
+}
+
+.sop-header h3 {
+  margin: 2px 0 0;
+  font-size: 22px;
+}
+
+.sop-close-button {
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: 50%;
+  background: #edf3f5;
+  color: #3c5662;
+  font-size: 29px;
+  line-height: 1;
+}
+
+.sop-progress {
+  height: 5px;
+  background: #dfecef;
+}
+
+.sop-progress span {
+  display: block;
+  height: 100%;
+  border-radius: 0 4px 4px 0;
+  background: #0e7894;
+  transition: width 180ms ease;
+}
+
+.sop-step-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 18px;
+  color: #607681;
+  font-size: 12px;
+}
+
+.sop-step-meta strong {
+  color: #173845;
+}
+
+.sop-mode-select {
+  display: grid;
+  gap: 6px;
+  margin: 0 18px 12px;
+  color: #49636f;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.sop-mode-select select {
+  min-height: 48px;
+  padding: 10px 12px;
+  border: 1px solid #bfd5dc;
+  border-radius: 10px;
+  background: #fff;
+  color: #173845;
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.sop-content {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 18px 16px;
+  overscroll-behavior: contain;
+}
+
+.sop-step-card,
+.sop-result-panel {
+  padding: 18px;
+  border: 1px solid #d6e5e9;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 10px 26px rgba(17, 58, 76, 0.08);
+}
+
+.sop-step-card h4,
+.sop-result-panel h4 {
+  margin: 4px 0 12px;
+  color: #102f3d;
+  font-size: 22px;
+  line-height: 1.25;
+}
+
+.sop-instruction {
+  margin: 0;
+  color: #203f4b;
+  font-size: 18px;
+  font-weight: 750;
+  line-height: 1.65;
+}
+
+.sop-note,
+.sop-warning,
+.sop-no-wait {
+  margin-top: 15px;
+  padding: 12px 13px;
+  border-radius: 10px;
+  background: #eef7f8;
+  color: #345a68;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.sop-note strong,
+.sop-warning strong {
+  display: block;
+  margin-bottom: 3px;
+}
+
+.sop-warning {
+  border: 1px solid #efd8a9;
+  background: #fff8e9;
+  color: #6f5423;
+}
+
+.sop-no-wait {
+  color: #58717c;
+  text-align: center;
+  font-size: 12px;
+}
+
+.sop-timer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 16px;
+  padding: 12px;
+  border: 1px solid #c9dfe4;
+  border-radius: 10px;
+  background: #f1f8f9;
+}
+
+.sop-timer div {
+  display: grid;
+  gap: 2px;
+}
+
+.sop-timer span {
+  color: #647983;
+  font-size: 11px;
+}
+
+.sop-timer strong {
+  color: #0b657d;
+  font-size: 19px;
+}
+
+.sop-result-panel label {
+  display: grid;
+  gap: 8px;
+  color: #415f6b;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.sop-result-panel input {
+  min-height: 54px;
+  padding: 12px 14px;
+  border: 1px solid #b9d3da;
+  border-radius: 10px;
+  background: #fff;
+  color: #112f3c;
+  font-size: 18px;
+  font-weight: 850;
+}
+
+.sop-conversion {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 9px 16px;
+  margin-top: 16px;
+  padding: 14px;
+  border-radius: 10px;
+  background: #edf6f8;
+  color: #536c77;
+  font-size: 13px;
+}
+
+.sop-conversion strong {
+  color: #123947;
+  text-align: right;
+}
+
+.sop-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+  gap: 10px;
+  padding: 13px 18px calc(13px + env(safe-area-inset-bottom));
+  border-top: 1px solid #d9e7ea;
+  background: rgba(255, 255, 255, 0.97);
+}
+
+.sop-actions button {
+  min-height: 52px;
+  font-size: 15px;
+}
+
+.sop-skip-button {
+  margin: -5px 18px calc(8px + env(safe-area-inset-bottom));
+  border: 0;
+  background: transparent;
+  color: #607984;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.sop-next-hint {
+  margin: -2px 18px 10px;
+  color: #54717c;
+  text-align: center;
+  font-size: 11px;
+}
+
 .danger-button {
   border-color: #f2c4c8;
   background: var(--red-soft);
@@ -1356,6 +1663,38 @@ th {
     padding-bottom: calc(78px + env(safe-area-inset-bottom));
   }
 
+  body.sop-open {
+    padding-bottom: 0;
+  }
+
+  .sop-sheet {
+    inset: 0;
+    width: 100%;
+    max-height: 100dvh;
+    transform: none;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .sop-header {
+    padding-top: calc(15px + env(safe-area-inset-top));
+  }
+
+  .sop-content {
+    padding-right: 14px;
+    padding-left: 14px;
+  }
+
+  .sop-step-card,
+  .sop-result-panel {
+    padding: 17px;
+  }
+
+  .sop-actions {
+    padding-right: 14px;
+    padding-left: 14px;
+  }
+
   .app-shell {
     display: block;
     width: 100%;
@@ -1551,6 +1890,19 @@ th {
     border-top: 0;
     border-radius: 0 0 8px 8px;
     background: #f4fafb;
+  }
+
+  .measurement-field {
+    grid-template-columns: minmax(0, 1fr) 92px;
+  }
+
+  .measurement-method-button {
+    min-height: 52px;
+  }
+
+  .sop-start-button {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .measurement-date,

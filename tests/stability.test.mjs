@@ -125,7 +125,7 @@ test("Analysis Engine excludes inherited values from dosing fine-tuning", () => 
 });
 
 test("Safety Engine gives only conservative reminders outside KH, CA, and MG safe ranges", () => {
-  const criticalValues = { kh: 10.2, ca: 451, mg: 1451 };
+  const criticalValues = { kh: 10.2, ca: 481, mg: 1451 };
 
   for (const [parameter, currentValue] of Object.entries(criticalValues)) {
     const statusCode = classify(currentValue, DEFAULT_TANK.targets[parameter], parameter).code;
@@ -141,7 +141,7 @@ test("Safety Engine gives only conservative reminders outside KH, CA, and MG saf
   }
 });
 
-test("Event recovery mode keeps CA tube repair rises conservative and below high confidence", () => {
+test("Event recovery mode keeps CA tube repair rises observe-only and below high confidence", () => {
   const analysis = analyzeTank({
     tank: DEFAULT_TANK,
     records: [
@@ -163,17 +163,18 @@ test("Event recovery mode keeps CA tube repair rises conservative and below high
   assert.equal(ca.affected_element, "ca");
   assert.equal(ca.confidence_score === "low" || ca.confidence_score === "medium", true);
   assert.notEqual(ca.confidence_score, "high");
-  assert.equal(ca.reasonCode, "CA_RECOVERY_RISE_SMALL_REDUCE");
-  assert.equal(ca.doseChange, -0.1);
+  assert.equal(ca.reasonCode, "CONSERVATIVE_LIMIT_BELOW_MINIMUM_STEP");
+  assert.equal(ca.doseChange, 0);
+  assert.equal(ca.canApplyRecommendation, false);
   assert.equal(Math.abs(ca.adjustment_percentage) <= 2, true);
   assert.match(ca.warning_message, /長期消耗趨勢/);
 });
 
 test("KH low but already rising observes instead of increasing aggressively", () => {
   const result = calculateDosingRecommendation(dosingInput("kh", {
-    currentValue: 7.8,
-    previousValue: 7.5,
-    statusCode: classify(7.8, DEFAULT_TANK.targets.kh, "kh").code,
+    currentValue: 7.4,
+    previousValue: 7.1,
+    statusCode: classify(7.4, DEFAULT_TANK.targets.kh, "kh").code,
     trendText: "上升",
   }));
 
@@ -199,7 +200,7 @@ test("MG recovery mode limits changes to one percent and stays below high confid
   assert.equal(result.event_recovery_mode, true);
   assert.equal(result.confidence_score === "low" || result.confidence_score === "medium", true);
   assert.notEqual(result.confidence_score, "high");
-  assert.equal(result.doseChangeMlPerDay, -0.2);
+  assert.equal(result.doseChangeMlPerDay, -0.1);
   assert.equal(Math.abs(result.adjustment_percentage) <= 1, true);
 });
 
@@ -217,6 +218,153 @@ test("NO3 recovering inside target range stays observe-only and avoids aggressiv
   assert.equal(result.canApply, false);
   assert.equal(result.doseChangeMlPerDay, 0);
   assert.match(result.reasonText, /優先觀察/);
+});
+
+test("Stable Lock keeps the real-world stable case unchanged", () => {
+  const records = [
+    completeMeasurement({
+      id: "stable-before",
+      date: "2026-06-01",
+      kh: 7.7,
+      ca: 440,
+      mg: 1395,
+      k: 410,
+      no3: 1,
+      po4: 0.03,
+    }),
+    completeMeasurement({
+      id: "stable-current",
+      date: "2026-06-08",
+      kh: 7.7,
+      ca: 440,
+      mg: 1395,
+      k: 410,
+      no3: 1,
+      po4: 0.03,
+      measuredFields: { kh: true, ca: true, mg: true, k: false, no3: true, po4: true },
+    }),
+  ];
+  const analysis = analyzeTank({
+    tank: { ...DEFAULT_TANK, volume: 65 },
+    records,
+    dosing: {
+      kh: 10.3,
+      ca: 4,
+      mg: 0.8,
+      aplus: 0.4,
+      kplus: 0,
+      status: {
+        kh: { enabled: true, pausedDays: 0 },
+        ca: { enabled: true, pausedDays: 0 },
+        mg: { enabled: true, pausedDays: 0 },
+        aplus: { enabled: true, pausedDays: 0 },
+        kplus: { enabled: false, pausedDays: 0 },
+      },
+    },
+  });
+
+  for (const parameter of ["kh", "ca", "mg"]) {
+    const row = analysis.rows.find((item) => item.key === parameter);
+    assert.equal(row.reasonCode, "STABLE_LOCK_MAINTAIN", parameter);
+    assert.equal(row.doseChange, 0, parameter);
+    assert.equal(row.newDose, row.currentDose, parameter);
+    assert.equal(row.canApplyRecommendation, false, parameter);
+  }
+
+  assert.equal(analysis.rows.find((row) => row.key === "kh").newDose, 10.3);
+  assert.equal(analysis.rows.find((row) => row.key === "ca").newDose, 4);
+  assert.equal(analysis.rows.find((row) => row.key === "mg").newDose, 0.8);
+  assert.equal(analysis.rows.find((row) => row.key === "no3").reasonCode, "STABLE_IN_RANGE");
+  assert.equal(analysis.rows.find((row) => row.key === "po4").reasonCode, "STABLE_IN_RANGE");
+  assert.equal(analysis.rows.find((row) => row.key === "k").reasonCode, "VALUE_CARRIED_FORWARD");
+});
+
+test("Stable Lock also protects stable values when an older saved target range remains", () => {
+  const legacyTank = {
+    ...DEFAULT_TANK,
+    volume: 65,
+    targets: {
+      ...DEFAULT_TANK.targets,
+      kh: { min: 8, max: 9 },
+      ca: { min: 380, max: 420 },
+      mg: { min: 1320, max: 1380 },
+    },
+  };
+  const analysis = analyzeTank({
+    tank: legacyTank,
+    records: [
+      completeMeasurement({ id: "legacy-before", date: "2026-06-01", kh: 7.7, ca: 440, mg: 1395 }),
+      completeMeasurement({ id: "legacy-current", date: "2026-06-08", kh: 7.7, ca: 440, mg: 1395 }),
+    ],
+    dosing: { kh: 10.3, ca: 4, mg: 0.8, status: {} },
+  });
+
+  for (const parameter of ["kh", "ca", "mg"]) {
+    const row = analysis.rows.find((item) => item.key === parameter);
+    assert.equal(row.reasonCode, "STABLE_LOCK_MAINTAIN", parameter);
+    assert.equal(row.doseChange, 0, parameter);
+  }
+});
+
+test("CA waits for repeated out-of-range measurements before changing dose", () => {
+  const firstAnalysis = analyzeTank({
+    tank: DEFAULT_TANK,
+    records: [
+      completeMeasurement({ id: "ca-normal", date: "2026-06-01", ca: 440 }),
+      completeMeasurement({ id: "ca-first-high", date: "2026-06-08", ca: 460 }),
+    ],
+    dosing: { kh: 6, ca: 4, mg: 1, status: {} },
+  });
+  const firstHigh = firstAnalysis.rows.find((row) => row.key === "ca");
+
+  assert.equal(firstHigh.reasonCode, "CA_WAIT_FOR_CONFIRMED_DEVIATION");
+  assert.equal(firstHigh.doseChange, 0);
+
+  const confirmedAnalysis = analyzeTank({
+    tank: DEFAULT_TANK,
+    records: [
+      completeMeasurement({ id: "ca-normal", date: "2026-05-25", ca: 440 }),
+      completeMeasurement({ id: "ca-first-high", date: "2026-06-01", ca: 460 }),
+      completeMeasurement({ id: "ca-second-high", date: "2026-06-08", ca: 461 }),
+    ],
+    dosing: { kh: 6, ca: 4, mg: 1, status: {} },
+  });
+  const confirmedHigh = confirmedAnalysis.rows.find((row) => row.key === "ca");
+
+  assert.equal(confirmedHigh.reasonCode, "HIGH_REDUCE_ONLY");
+  assert.equal(confirmedHigh.doseChange, -0.2);
+});
+
+test("Nano tanks and recent disruptive events reduce dosing adjustments", () => {
+  const records = [
+    completeMeasurement({ id: "kh-before", date: "2026-06-01", kh: 7.8 }),
+    completeMeasurement({ id: "kh-current", date: "2026-06-08", kh: 7.3 }),
+  ];
+  const largeTank = analyzeTank({
+    tank: { ...DEFAULT_TANK, volume: 200 },
+    records,
+    dosing: { kh: 10, ca: 4, mg: 1, status: {} },
+  }).rows.find((row) => row.key === "kh");
+  const nanoTank = analyzeTank({
+    tank: { ...DEFAULT_TANK, volume: 65 },
+    records,
+    dosing: { kh: 10, ca: 4, mg: 1, status: {} },
+  }).rows.find((row) => row.key === "kh");
+  const recentLargeWaterChange = analyzeTank({
+    tank: { ...DEFAULT_TANK, volume: 200 },
+    records,
+    dosing: { kh: 10, ca: 4, mg: 1, status: {} },
+    maintenance: [{
+      date: "2026-06-06",
+      waterChangeCount: 1,
+      waterChangeVolume: 50,
+    }],
+  }).rows.find((row) => row.key === "kh");
+
+  assert.equal(largeTank.doseChange, 0.3);
+  assert.equal(nanoTank.doseChange, 0.1);
+  assert.equal(recentLargeWaterChange.observe_mode, true);
+  assert.equal(recentLargeWaterChange.doseChange, 0.1);
 });
 
 test("Tank Store records recovery events without breaking existing tank data", () => {

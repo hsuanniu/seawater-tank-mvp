@@ -3,7 +3,7 @@ import { PARAMETERS, targetSpan } from "../modules/tankModule.js";
 
 export const CRITICAL_RANGES = {
   kh: { low: 7, high: 10 },
-  ca: { low: 350, high: 450 },
+  ca: { low: 350, high: 480 },
   mg: { low: 1250, high: 1450 },
   k: { low: 350, high: 450 },
   no3: { low: 0, high: 10 },
@@ -47,20 +47,33 @@ export function trend(current, previous, tolerance) {
   return delta > 0 ? "上升" : "下降";
 }
 
-function boundedDoseChange(parameter, currentDoseMlPerDay, direction, statusCode, recoveryContext = {}) {
+function boundedDoseChange(
+  parameter,
+  currentDoseMlPerDay,
+  direction,
+  statusCode,
+  recoveryContext = {},
+  tankVolumeLiters,
+  observeContext = {},
+) {
   const limits = DOSING_LIMITS[parameter];
   if (!limits || !currentDoseMlPerDay || currentDoseMlPerDay <= 0) return 0;
+  let baseLimit = 0;
   if (recoveryContext.event_recovery_mode) {
     const recoveryLimit = RECOVERY_DOSING_LIMITS[parameter];
     if (!recoveryLimit) return 0;
-    const rawLimit = currentDoseMlPerDay * recoveryLimit.percent;
-    const conservativeLimit = Math.floor(rawLimit * 10) / 10;
-    return Number((direction * conservativeLimit).toFixed(1));
+    baseLimit = currentDoseMlPerDay * recoveryLimit.percent;
+  } else {
+    const isNormalFineTune = statusCode === "NORMAL";
+    const percentLimit = currentDoseMlPerDay * (isNormalFineTune ? limits.normalPercent : limits.percent);
+    const mlLimit = isNormalFineTune ? limits.normalMaxMlChange : limits.maxMlChange;
+    baseLimit = Math.min(percentLimit, mlLimit);
   }
-  const isNormalFineTune = statusCode === "NORMAL";
-  const percentLimit = currentDoseMlPerDay * (isNormalFineTune ? limits.normalPercent : limits.percent);
-  const mlLimit = isNormalFineTune ? limits.normalMaxMlChange : limits.maxMlChange;
-  return Number((direction * Math.min(percentLimit, mlLimit)).toFixed(1));
+
+  const nanoFactor = Number.isFinite(tankVolumeLiters) && tankVolumeLiters < 100 ? 0.5 : 1;
+  const observeFactor = observeContext.observe_mode ? observeContext.adjustment_factor || 0.5 : 1;
+  const conservativeLimit = Math.floor(baseLimit * nanoFactor * observeFactor * 10) / 10;
+  return Number((direction * conservativeLimit).toFixed(1));
 }
 
 export function classifyTrendSpeed(parameter, dailyDelta) {
@@ -72,10 +85,19 @@ export function classifyTrendSpeed(parameter, dailyDelta) {
   };
 }
 
-function confidenceFor({ hasPrevious, doseStatus, currentDoseMlPerDay, statusCode, trendTooFast, recoveryContext }) {
+function confidenceFor({
+  hasPrevious,
+  doseStatus,
+  currentDoseMlPerDay,
+  statusCode,
+  trendTooFast,
+  recoveryContext,
+  observeContext,
+}) {
   if (!hasPrevious || currentDoseMlPerDay <= 0 || !doseStatus.enabled || doseStatus.pausedDays > 0) return "INSUFFICIENT";
   if (recoveryContext?.event_recovery_mode && trendTooFast) return "LOW";
   if (recoveryContext?.event_recovery_mode) return "MEDIUM";
+  if (observeContext?.observe_mode) return "MEDIUM";
   if (statusCode === "CRITICAL_LOW" || statusCode === "CRITICAL_HIGH" || trendTooFast) return "INSUFFICIENT";
   if (statusCode === "NORMAL") return "MEDIUM";
   return "HIGH";
@@ -119,6 +141,7 @@ function observeOnlyResult({
   dailyDelta,
   speed,
   recoveryContext = {},
+  observeContext = {},
   warningMessage = "",
 }) {
   return {
@@ -138,8 +161,9 @@ function observeOnlyResult({
     trendTooFast: speed.tooFast,
     trendSpeedText: speed.text,
     event_recovery_mode: Boolean(recoveryContext.event_recovery_mode),
+    observe_mode: Boolean(observeContext.observe_mode),
     affected_element: recoveryContext.affected_element || null,
-    warning_message: warningMessage,
+    warning_message: warningMessage || (recoveryContext.event_recovery_mode ? recoveryWarning(recoveryContext.affected_element) : ""),
   };
 }
 
@@ -155,7 +179,8 @@ export function calculateDosingRecommendation({
   statusCode,
   trendText,
   recoveryContext = {},
-  recentTrend = {},
+  stabilityContext = {},
+  observeContext = {},
 }) {
   const param = PARAMETERS.find((item) => item.key === parameter);
   const dailyDelta = previousValue === null || daysBetweenTests === null ? null : (currentValue - previousValue) / daysBetweenTests;
@@ -165,15 +190,18 @@ export function calculateDosingRecommendation({
 
   if (!APPLICABLE_DOSE_KEYS.includes(parameter)) {
     const nutrientReason = nutrientRecoveryReason(parameter, currentValue, previousValue, targetRange, trendText);
+    const stableReason = stabilityContext.inStabilityRange && stabilityContext.withinDeadZone
+      ? `${param.label} 位於建議範圍內，且變化落在測量誤差容忍區，維持目前管理方式。`
+      : "";
     return {
       suggestedDoseMlPerDay: currentDoseMlPerDay,
       doseChangeMlPerDay: 0,
       recommended_dosing: currentDoseMlPerDay,
       adjustment_percentage: 0,
       action: "OBSERVE",
-      reasonCode: nutrientReason?.reasonCode || "NO_AUTO_DOSING_FOR_PARAMETER",
-      reasonText: nutrientReason?.reasonText || "此項目不提供自動滴定量建議，只做狀態與趨勢提醒。",
-      reason: nutrientReason?.reasonText || "此項目不提供自動滴定量建議，只做狀態與趨勢提醒。",
+      reasonCode: nutrientReason?.reasonCode || (stableReason ? "STABLE_IN_RANGE" : "NO_AUTO_DOSING_FOR_PARAMETER"),
+      reasonText: nutrientReason?.reasonText || stableReason || "此項目不提供自動滴定量建議，只做狀態與趨勢提醒。",
+      reason: nutrientReason?.reasonText || stableReason || "此項目不提供自動滴定量建議，只做狀態與趨勢提醒。",
       safetyWarnings: [
         "NO3 / PO4 / 鉀(K) 不進行自動滴定建議，避免用藥或微量元素快速修正。",
         ...(nutrientReason?.warning ? [nutrientReason.warning] : []),
@@ -185,6 +213,7 @@ export function calculateDosingRecommendation({
       trendTooFast: speed.tooFast,
       trendSpeedText: speed.text,
       event_recovery_mode: false,
+      observe_mode: Boolean(observeContext.observe_mode),
       affected_element: null,
       warning_message: nutrientReason?.warning || "",
     };
@@ -200,6 +229,12 @@ export function calculateDosingRecommendation({
   if (recoveryContext.event_recovery_mode) {
     safetyWarnings.push(recoveryWarning(parameter));
   }
+  if (observeContext.observe_mode) {
+    safetyWarnings.push(`近 7 天有影響判讀的事件：${observeContext.reasons.join("、")}。本次只允許更保守的微調或觀察。`);
+  }
+  if (Number.isFinite(tankVolumeLiters) && tankVolumeLiters < 100) {
+    safetyWarnings.push("目前為 100L 以下小缸，滴定調整幅度已套用 0.5 保守係數。");
+  }
 
   const confidenceLevel = confidenceFor({
     hasPrevious,
@@ -208,6 +243,7 @@ export function calculateDosingRecommendation({
     statusCode,
     trendTooFast: speed.tooFast,
     recoveryContext,
+    observeContext,
   });
 
   if (!hasPrevious) {
@@ -220,6 +256,7 @@ export function calculateDosingRecommendation({
       dailyDelta,
       speed,
       recoveryContext,
+      observeContext,
     });
   }
 
@@ -233,6 +270,7 @@ export function calculateDosingRecommendation({
       dailyDelta,
       speed,
       recoveryContext,
+      observeContext,
     });
   }
 
@@ -256,6 +294,7 @@ export function calculateDosingRecommendation({
       event_recovery_mode: Boolean(recoveryContext.event_recovery_mode),
       affected_element: recoveryContext.affected_element || null,
       warning_message: recoveryContext.event_recovery_mode ? recoveryWarning(parameter) : "",
+      observe_mode: Boolean(observeContext.observe_mode),
     };
   }
 
@@ -279,6 +318,7 @@ export function calculateDosingRecommendation({
       event_recovery_mode: Boolean(recoveryContext.event_recovery_mode),
       affected_element: recoveryContext.affected_element || null,
       warning_message: recoveryContext.event_recovery_mode ? recoveryWarning(parameter) : "",
+      observe_mode: Boolean(observeContext.observe_mode),
     };
   }
 
@@ -293,6 +333,7 @@ export function calculateDosingRecommendation({
       dailyDelta,
       speed,
       recoveryContext,
+      observeContext,
     });
   }
 
@@ -306,6 +347,48 @@ export function calculateDosingRecommendation({
       dailyDelta,
       speed,
       recoveryContext,
+      observeContext,
+    });
+  }
+
+  if (
+    stabilityContext.stableLock
+    || (
+      stabilityContext.withinDeadZone
+      && (stabilityContext.inTargetRange || !stabilityContext.hasConfirmedOutOfRange)
+    )
+  ) {
+    const stableLockActive = stabilityContext.stableLock;
+    return observeOnlyResult({
+      currentDoseMlPerDay,
+      reasonCode: stableLockActive ? "STABLE_LOCK_MAINTAIN" : "DEAD_ZONE_MAINTAIN",
+      reasonText: stableLockActive
+        ? `${param.label} 與前次差異落在測量誤差內，且間隔至少 5 天；穩定鎖定優先，維持目前滴定量。`
+        : `${param.label} 與前次差異落在測量誤差容忍區，先維持目前滴定量，不追逐單次目標數字。`,
+      safetyWarnings,
+      confidenceLevel,
+      dailyDelta,
+      speed,
+      recoveryContext,
+      observeContext,
+    });
+  }
+
+  if (
+    statusCode !== "NORMAL"
+    && ["ca", "mg"].includes(parameter)
+    && !stabilityContext.hasConfirmedOutOfRange
+  ) {
+    return observeOnlyResult({
+      currentDoseMlPerDay,
+      reasonCode: `${parameter.toUpperCase()}_WAIT_FOR_CONFIRMED_DEVIATION`,
+      reasonText: `${param.label} 尚未連續 ${stabilityContext.requiredOutOfRangeSamples} 次偏離建議範圍，先維持並確認趨勢，不因單次數值調整。`,
+      safetyWarnings,
+      confidenceLevel,
+      dailyDelta,
+      speed,
+      recoveryContext,
+      observeContext,
     });
   }
 
@@ -380,10 +463,32 @@ export function calculateDosingRecommendation({
       event_recovery_mode: Boolean(recoveryContext.event_recovery_mode),
       affected_element: recoveryContext.affected_element || null,
       warning_message: recoveryContext.event_recovery_mode ? recoveryWarning(parameter) : "",
+      observe_mode: Boolean(observeContext.observe_mode),
     };
   }
 
-  const doseChangeMlPerDay = boundedDoseChange(parameter, currentDoseMlPerDay, direction, statusCode, recoveryContext);
+  const doseChangeMlPerDay = boundedDoseChange(
+    parameter,
+    currentDoseMlPerDay,
+    direction,
+    statusCode,
+    recoveryContext,
+    tankVolumeLiters,
+    observeContext,
+  );
+  if (doseChangeMlPerDay === 0) {
+    return observeOnlyResult({
+      currentDoseMlPerDay,
+      reasonCode: "CONSERVATIVE_LIMIT_BELOW_MINIMUM_STEP",
+      reasonText: `${param.label} 雖有偏離，但套用小缸或事件保守係數後低於最小 0.1 ml/day 調整刻度，先維持觀察。`,
+      safetyWarnings,
+      confidenceLevel,
+      dailyDelta,
+      speed,
+      recoveryContext,
+      observeContext,
+    });
+  }
   const suggestedDoseMlPerDay = Number(Math.max(0, currentDoseMlPerDay + doseChangeMlPerDay).toFixed(1));
   const percent = adjustmentPercentage(doseChangeMlPerDay, currentDoseMlPerDay);
   let finalReasonText = reasonText;
@@ -407,6 +512,7 @@ export function calculateDosingRecommendation({
     trendTooFast: speed.tooFast,
     trendSpeedText: speed.text,
     event_recovery_mode: Boolean(recoveryContext.event_recovery_mode),
+    observe_mode: Boolean(observeContext.observe_mode),
     affected_element: recoveryContext.affected_element || null,
     warning_message: recoveryContext.event_recovery_mode ? recoveryWarning(parameter) : "",
   };

@@ -7,7 +7,7 @@
     <meta name="theme-color" content="#0b2f48" />
     <link rel="manifest" href="manifest.webmanifest" />
     <link rel="apple-touch-icon" href="icons/icon-192.svg" />
-    <link rel="stylesheet" href="styles.css?v=20260603-pwa-refresh" />
+    <link rel="stylesheet" href="styles.css?v=20260611-measurement-sop" />
   </head>
   <body>
     <div class="app-shell">
@@ -118,18 +118,40 @@
             <div class="notice compact">
               沒有測量的項目可留空，系統會沿用上一筆數值並標記「沿用」。沿用項目不會用來產生滴定調整。
             </div>
+            <button class="sop-start-button" id="startMeasurementSopBtn" type="button">
+              <span>開始測量流程</span>
+              <small>KH → NO3 → PO4 → MG → CA → 鉀(K)</small>
+            </button>
             <div class="section-label">主要元素</div>
             <div class="form-grid wide measurement-grid">
               <label class="measurement-date">日期<input name="date" type="date" required /></label>
-              <label>KH dKH<input name="kh" type="text" inputmode="decimal" placeholder="留空沿用" /></label>
-              <label>CA ppm<input name="ca" type="text" inputmode="decimal" placeholder="留空沿用" /></label>
-              <label>MG ppm<input name="mg" type="text" inputmode="decimal" placeholder="留空沿用" /></label>
-              <label>鉀(K) ppm<input name="k" type="text" inputmode="decimal" placeholder="留空沿用" /></label>
+              <div class="measurement-field">
+                <label>KH dKH<input name="kh" type="text" inputmode="decimal" placeholder="留空沿用" /></label>
+                <button class="measurement-method-button" type="button" data-open-sop="kh">測量方法</button>
+              </div>
+              <div class="measurement-field">
+                <label>CA ppm<input name="ca" type="text" inputmode="decimal" placeholder="留空沿用" /></label>
+                <button class="measurement-method-button" type="button" data-open-sop="ca">測量方法</button>
+              </div>
+              <div class="measurement-field">
+                <label>MG ppm<input name="mg" type="text" inputmode="decimal" placeholder="留空沿用" /></label>
+                <button class="measurement-method-button" type="button" data-open-sop="mg">測量方法</button>
+              </div>
+              <div class="measurement-field">
+                <label>鉀(K) ppm<input name="k" type="text" inputmode="decimal" placeholder="留空沿用" /></label>
+                <button class="measurement-method-button" type="button" data-open-sop="k">測量方法</button>
+              </div>
             </div>
             <div class="section-label">營養鹽與環境</div>
             <div class="form-grid wide measurement-grid">
-              <label>NO3 ppm<input name="no3" type="text" inputmode="decimal" placeholder="留空沿用" /></label>
-              <label>PO4 ppm<input name="po4" type="text" inputmode="decimal" placeholder="留空沿用" /></label>
+              <div class="measurement-field">
+                <label>NO3 ppm<input name="no3" type="text" inputmode="decimal" placeholder="留空沿用" /></label>
+                <button class="measurement-method-button" type="button" data-open-sop="no3">測量方法</button>
+              </div>
+              <div class="measurement-field">
+                <label>PO4 ppm<input name="po4" type="text" inputmode="decimal" placeholder="留空沿用" /></label>
+                <button class="measurement-method-button" type="button" data-open-sop="po4">測量方法</button>
+              </div>
               <label>鹽度<input name="salinity" type="text" inputmode="decimal" placeholder="1.026" /></label>
               <label>水溫 °C<input name="temperature" type="text" inputmode="decimal" placeholder="25.5" /></label>
             </div>
@@ -471,6 +493,8 @@
       </main>
     </div>
 
+    <div id="measurementSopRoot" class="measurement-sop-root" hidden></div>
+
     <nav class="mobile-bottom-nav" aria-label="手機快速導覽">
       <button class="nav-link mobile-nav-link active" data-section="dashboard">首頁</button>
       <button class="nav-link mobile-nav-link mobile-nav-primary" data-section="water">新增測量</button>
@@ -479,7 +503,7 @@
     </nav>
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script type="module" src="app.module.js?v=20260603-pwa-refresh"></script>
-    <script defer src="app.js?v=20260603-pwa-refresh"></script>
+    <script type="module" src="app.module.js?v=20260611-measurement-sop"></script>
+    <script defer src="app.js?v=20260611-measurement-sop"></script>
   </body>
 </html>

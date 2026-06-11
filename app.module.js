@@ -1,6 +1,7 @@
 import { nutrientFocusText, nutrientNotes } from "./components/aiExplanationModule.js";
 import { actionText, changeText, confidenceText, dailyDeltaText, doseSuggestionText, formatDoseSentence, primaryFocus } from "./components/dashboardModule.js?v=20260520-safety-ux";
-import { analyzeTank } from "./engines/analysisEngine.js?v=20260603-event-recovery";
+import { createMeasurementSopController } from "./components/measurementSopComponent.js?v=20260611-measurement-sop";
+import { analyzeTank } from "./engines/analysisEngine.js?v=20260611-stable-lock";
 import { additiveLabel, normalizeAdditiveLog } from "./modules/additiveLogModule.js?v=20260520-additive-feeding-log2";
 import { analyzeBioLoadReferences, WEEKDAYS } from "./modules/bioLoadModule.js?v=20260520-additive-feeding-log2";
 import { APPLICABLE_DOSE_KEYS, createDoseApplicationEntry, getDoseStatus as readDoseStatus } from "./modules/dosingModule.js?v=20260521-stability-tests";
@@ -17,8 +18,8 @@ const CLOUD_CONFIG_KEY = "seawaterTankCloudConfig.v1";
 const CLOUD_TABLE = "user_app_state";
 const APP_VERSION_STORAGE_KEY = "seawaterTankAppVersion.v1";
 const FALLBACK_VERSION = {
-  current_version: "2026.06.03-pwa-refresh",
-  build_time: "2026-06-03T00:00:00+08:00",
+  current_version: "2026.06.11-measurement-sop",
+  build_time: "2026-06-11T12:00:00+08:00",
 };
 const DEBUG_MODE = false;
 let supabaseClient = null;
@@ -28,6 +29,7 @@ let suppressCloudSave = false;
 let dosingAutoSaveTimer = null;
 let feedbackTimer = null;
 let historyMode = "active";
+let measurementMethodDraft = {};
 
 const TankStore = createTankStore({
   storageKey: STORAGE_KEY,
@@ -48,6 +50,22 @@ const TankStore = createTankStore({
   onDosingDebug: debugDosingSync,
 });
 
+const MeasurementSop = createMeasurementSopController({
+  root: document.querySelector("#measurementSopRoot"),
+  onApply: (result) => {
+    const input = document.querySelector(`#waterForm [name="${result.parameter}"]`);
+    if (input) input.value = result.finalValue;
+    measurementMethodDraft[result.parameter] = {
+      mode: result.mode,
+      modeLabel: result.modeLabel,
+      rawValue: result.rawValue,
+      finalValue: result.finalValue,
+      formula: result.formula,
+    };
+  },
+  onToast: showToast,
+});
+
 function activeTank() {
   return TankStore.getActiveTank();
 }
@@ -66,6 +84,10 @@ function measurements() {
 
 function archivedMeasurements() {
   return TankStore.getArchivedMeasurements();
+}
+
+function maintenanceRecords() {
+  return TankStore.getMaintenance();
 }
 
 function livestock() {
@@ -250,6 +272,8 @@ function analyze() {
     records: measurements(),
     dosing: dosingSettings(),
     events: systemEvents(),
+    maintenance: maintenanceRecords(),
+    livestock: livestock(),
   });
 }
 
@@ -315,6 +339,8 @@ function buildMeasurementSnapshot(record) {
     records: recordsWithPendingMeasurement(record),
     dosing: dosingSettings(),
     events: systemEvents(),
+    maintenance: maintenanceRecords(),
+    livestock: livestock(),
   });
   return {
     createdAt: new Date().toISOString(),
@@ -1458,6 +1484,8 @@ function setupEvents() {
   document.addEventListener("click", (event) => {
     const target = event.target.closest("[data-goto]");
     if (target) switchPage(target.dataset.goto);
+    const sopTarget = event.target.closest("[data-open-sop]");
+    if (sopTarget) MeasurementSop.open(sopTarget.dataset.openSop);
     const applyTarget = event.target.closest("[data-apply-dose]");
     if (applyTarget) applyDoseRecommendation(applyTarget.dataset.applyDose);
     const removeFishTarget = event.target.closest("[data-remove-fish]");
@@ -1511,6 +1539,10 @@ function setupEvents() {
   document.querySelector("#tankSelect").addEventListener("change", (event) => {
     TankStore.setActiveTank(event.target.value);
     showToast(`已切換到 ${tankSettings().name}`);
+  });
+
+  document.querySelector("#startMeasurementSopBtn").addEventListener("click", () => {
+    MeasurementSop.open("kh", { sequence: true });
   });
 
   document.querySelector("#addTankBtn").addEventListener("click", () => {
@@ -1603,14 +1635,25 @@ function setupEvents() {
       showToast(result.error);
       return;
     }
+    if (Object.keys(measurementMethodDraft).length) {
+      result.record.measurementMethods = cloneData(measurementMethodDraft);
+    }
     result.record.snapshot = buildMeasurementSnapshot(result.record);
     const saveResult = TankStore.upsertMeasurementByDate(result.record);
     event.currentTarget.reset();
+    measurementMethodDraft = {};
     event.currentTarget.date.value = todayText();
     switchPage("analysis");
     showSavedFeedback(event.submitter, saveResult.mode === "updated" ? "已更新" : "已新增");
     const savedText = saveResult.mode === "updated" ? "同日期水質紀錄已更新，不重複新增" : "水質紀錄已新增";
     showToast(result.carriedFields.length ? `${savedText}；${result.carriedFields.join("、")} 沿用上一筆` : savedText);
+  });
+
+  document.querySelector("#waterForm").addEventListener("input", (event) => {
+    const parameter = event.target?.name;
+    if (parameter && measurementMethodDraft[parameter]) {
+      delete measurementMethodDraft[parameter];
+    }
   });
 
   document.querySelector("#dosingForm").addEventListener("submit", (event) => {

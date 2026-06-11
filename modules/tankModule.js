@@ -2,30 +2,30 @@ export const DEFAULT_TANK = {
   name: "我的海水缸",
   volume: 200,
   targets: {
-    kh: { min: 8, max: 9 },
-    ca: { min: 380, max: 420 },
-    mg: { min: 1320, max: 1380 },
-    k: { min: 380, max: 420 },
-    no3: { min: 0.25, max: 2 },
-    po4: { min: 0.02, max: 0.1 },
+    kh: { min: 7.5, max: 8.5 },
+    ca: { min: 400, max: 450 },
+    mg: { min: 1320, max: 1400 },
+    k: { min: 390, max: 420 },
+    no3: { min: 0.5, max: 2 },
+    po4: { min: 0.02, max: 0.08 },
   },
   targetInputs: {
-    kh: "8-9",
-    ca: "400+/-20",
-    mg: "1350+/-30",
-    k: "400",
-    no3: "0.25-2",
-    po4: "0.02-0.10",
+    kh: "7.5-8.5",
+    ca: "400-450",
+    mg: "1320-1400",
+    k: "390-420",
+    no3: "0.5-2",
+    po4: "0.02-0.08",
   },
 };
 
 export const PARAMETERS = [
   { key: "kh", label: "KH", unit: "dKH", tolerance: 0.2, singleTolerance: 0.5, doseKey: "kh", minAdjust: 0.05, maxAdjust: 0.1 },
   { key: "ca", label: "CA", unit: "ppm", tolerance: 10, singleTolerance: 20, doseKey: "ca", minAdjust: 0.05, maxAdjust: 0.15 },
-  { key: "mg", label: "MG", unit: "ppm", tolerance: 20, singleTolerance: 30, doseKey: "mg", minAdjust: 0.1, maxAdjust: 0.2 },
+  { key: "mg", label: "MG", unit: "ppm", tolerance: 30, singleTolerance: 30, doseKey: "mg", minAdjust: 0.1, maxAdjust: 0.2 },
   { key: "k", label: "鉀(K)", unit: "ppm", tolerance: 10, singleTolerance: 20, doseKey: "kplus", minAdjust: 0, maxAdjust: 0 },
-  { key: "no3", label: "NO3", unit: "ppm", tolerance: 0.1, singleTolerance: 0.25 },
-  { key: "po4", label: "PO4", unit: "ppm", tolerance: 0.01, singleTolerance: 0.02 },
+  { key: "no3", label: "NO3", unit: "ppm", tolerance: 0.5, singleTolerance: 0.5 },
+  { key: "po4", label: "PO4", unit: "ppm", tolerance: 0.02, singleTolerance: 0.02 },
 ];
 
 export function normalizeTarget(a, b) {

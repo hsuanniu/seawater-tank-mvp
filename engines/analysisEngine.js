@@ -3,9 +3,17 @@ import { daysBetweenRecords, latestRecords } from "../modules/measurementModule.
 import { PARAMETERS } from "../modules/tankModule.js";
 import { toNumber } from "../services/formatService.js";
 import { buildRecoveryContext, recoveryContextForElement } from "./eventRecoveryEngine.js";
-import { calculateDosingRecommendation, classify, trend } from "./safetyEngine.js?v=20260603-event-recovery";
+import { buildObserveContext, buildStabilityContext } from "./stabilityEngine.js";
+import { calculateDosingRecommendation, classify, trend } from "./safetyEngine.js?v=20260611-stable-lock";
 
-export function analyzeTank({ tank, records, dosing, events = [] }) {
+export function analyzeTank({
+  tank,
+  records,
+  dosing,
+  events = [],
+  maintenance = [],
+  livestock = [],
+}) {
   const { latest, previous } = latestRecords(records);
   if (!latest) return null;
   const intervalDays = daysBetweenRecords(latest, previous);
@@ -14,6 +22,13 @@ export function analyzeTank({ tank, records, dosing, events = [] }) {
     latestDate: latest.date,
     records,
     targets: tank.targets,
+  });
+  const observeContext = buildObserveContext({
+    latestDate: latest.date,
+    tankVolumeLiters: toNumber(tank.volume),
+    events,
+    maintenance,
+    livestock,
   });
 
   const rows = PARAMETERS.map((param) => {
@@ -30,6 +45,14 @@ export function analyzeTank({ tank, records, dosing, events = [] }) {
     const currentDose = param.doseKey ? toNumber(dosing[param.doseKey]) : null;
     const doseStatus = param.doseKey ? getDoseStatus(dosing, param.doseKey) : null;
     const elementRecoveryContext = recoveryContextForElement(recoveryContext, param.key);
+    const stabilityContext = buildStabilityContext({
+      parameter: param.key,
+      currentValue: value,
+      previousValue,
+      targetRange: target,
+      daysBetweenTests: intervalDays,
+      records,
+    });
     let recommendation = calculateDosingRecommendation({
       parameter: param.key,
       currentValue: value,
@@ -42,6 +65,8 @@ export function analyzeTank({ tank, records, dosing, events = [] }) {
       statusCode: status.code,
       trendText,
       recoveryContext: elementRecoveryContext,
+      stabilityContext,
+      observeContext,
     });
     if (!isMeasured) {
       recommendation = {
@@ -109,6 +134,9 @@ export function analyzeTank({ tank, records, dosing, events = [] }) {
       event_recovery_mode: recommendation.event_recovery_mode,
       affected_element: recommendation.affected_element,
       warning_message: recommendation.warning_message,
+      stableLock: stabilityContext.stableLock,
+      withinDeadZone: stabilityContext.withinDeadZone,
+      observe_mode: recommendation.observe_mode,
     };
   });
 
@@ -117,6 +145,7 @@ export function analyzeTank({ tank, records, dosing, events = [] }) {
     previous,
     daysSincePrevious: intervalDays,
     recoveryContext,
+    observeContext,
     rows,
   };
 }
