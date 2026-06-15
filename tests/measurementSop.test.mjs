@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  buildMeasurementSopSummary,
   convertMeasurementReading,
   getMeasurementSop,
   MEASUREMENT_SOP_ORDER,
@@ -67,4 +68,33 @@ test("Measurement conversion rejects blank, invalid, and negative readings", () 
   assert.ok(convertMeasurementReading({ parameter: "kh", rawValue: "", mode: "standard" }).error);
   assert.ok(convertMeasurementReading({ parameter: "kh", rawValue: "abc", mode: "standard" }).error);
   assert.ok(convertMeasurementReading({ parameter: "kh", rawValue: -1, mode: "standard" }).error);
+});
+
+test("Measurement SOP summary separates measured and skipped parameters", () => {
+  const summary = buildMeasurementSopSummary({
+    kh: { status: "measured", finalValue: 7.8 },
+    no3: { status: "measured", finalValue: 1 },
+    po4: { status: "skipped" },
+    mg: { status: "skipped" },
+    ca: { status: "measured", finalValue: 420 },
+    k: { status: "skipped" },
+  });
+
+  assert.deepEqual(summary.measured, ["kh", "no3", "ca"]);
+  assert.deepEqual(summary.skipped, ["po4", "mg", "k"]);
+  assert.deepEqual(summary.pending, []);
+  assert.deepEqual(summary.recommendationEligible, ["kh", "ca"]);
+});
+
+test("Skipped KH CA and MG never appear as recommendation eligible", () => {
+  const summary = buildMeasurementSopSummary({
+    kh: { status: "skipped" },
+    ca: { status: "skipped" },
+    mg: { status: "skipped" },
+    no3: { status: "measured", finalValue: 1 },
+    po4: { status: "measured", finalValue: 0.04 },
+    k: { status: "measured", finalValue: 400 },
+  });
+
+  assert.deepEqual(summary.recommendationEligible, []);
 });

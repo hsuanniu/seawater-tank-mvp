@@ -255,3 +255,17 @@ export function convertMeasurementReading({ parameter, rawValue, mode }) {
     finalValue,
   };
 }
+
+export function buildMeasurementSopSummary(results = {}) {
+  const measured = MEASUREMENT_SOP_ORDER.filter((key) => results[key]?.status === "measured");
+  const skipped = MEASUREMENT_SOP_ORDER.filter((key) => results[key]?.status === "skipped");
+  const pending = MEASUREMENT_SOP_ORDER.filter((key) => !results[key]);
+  const recommendationEligible = measured.filter((key) => ["kh", "ca", "mg"].includes(key));
+
+  return {
+    measured,
+    skipped,
+    pending,
+    recommendationEligible,
+  };
+}

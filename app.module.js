@@ -1,6 +1,6 @@
 import { nutrientFocusText, nutrientNotes } from "./components/aiExplanationModule.js";
 import { actionText, changeText, confidenceText, dailyDeltaText, doseSuggestionText, formatDoseSentence, primaryFocus } from "./components/dashboardModule.js?v=20260520-safety-ux";
-import { createMeasurementSopController } from "./components/measurementSopComponent.js?v=20260611-measurement-sop";
+import { createMeasurementSopController } from "./components/measurementSopComponent.js?v=20260615-sop-mobile-actions";
 import { analyzeTank } from "./engines/analysisEngine.js?v=20260611-stable-lock";
 import { additiveLabel, normalizeAdditiveLog } from "./modules/additiveLogModule.js?v=20260520-additive-feeding-log2";
 import { analyzeBioLoadReferences, WEEKDAYS } from "./modules/bioLoadModule.js?v=20260520-additive-feeding-log2";
@@ -18,8 +18,8 @@ const CLOUD_CONFIG_KEY = "seawaterTankCloudConfig.v1";
 const CLOUD_TABLE = "user_app_state";
 const APP_VERSION_STORAGE_KEY = "seawaterTankAppVersion.v1";
 const FALLBACK_VERSION = {
-  current_version: "2026.06.11-measurement-sop",
-  build_time: "2026-06-11T12:00:00+08:00",
+  current_version: "2026.06.15-hide-cloud-nav",
+  build_time: "2026-06-15T14:29:14+08:00",
 };
 const DEBUG_MODE = false;
 let supabaseClient = null;
@@ -62,6 +62,11 @@ const MeasurementSop = createMeasurementSopController({
       finalValue: result.finalValue,
       formula: result.formula,
     };
+  },
+  onSkip: (parameter) => {
+    const input = document.querySelector(`#waterForm [name="${parameter}"]`);
+    if (input) input.value = "";
+    delete measurementMethodDraft[parameter];
   },
   onToast: showToast,
 });

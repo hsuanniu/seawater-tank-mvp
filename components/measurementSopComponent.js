@@ -1,4 +1,5 @@
 import {
+  buildMeasurementSopSummary,
   convertMeasurementReading,
   getMeasurementSop,
   MEASUREMENT_SOP_ORDER,
@@ -12,12 +13,15 @@ function formatReading(value) {
 export function createMeasurementSopController({
   root,
   onApply,
+  onSkip = () => {},
   onToast = () => {},
 }) {
   let parameter = MEASUREMENT_SOP_ORDER[0];
   let mode = "standard";
   let stepIndex = 0;
   let sequenceMode = false;
+  let sequenceComplete = false;
+  let sequenceResults = {};
   let timerId = null;
   let timerRemaining = 0;
 
@@ -72,6 +76,61 @@ export function createMeasurementSopController({
 
   function render() {
     clearTimer();
+    if (sequenceComplete) {
+      const summary = buildMeasurementSopSummary(sequenceResults);
+      const labels = (keys) => keys.map((key) => getMeasurementSop(key).label).join("、") || "無";
+
+      root.innerHTML = `
+        <div class="sop-backdrop" data-sop-close></div>
+        <section class="sop-sheet" role="dialog" aria-modal="true" aria-labelledby="sopTitle">
+          <header class="sop-header">
+            <div>
+              <p class="eyebrow">測量流程完成</p>
+              <h3 id="sopTitle">確認本次測量</h3>
+            </div>
+            <button class="sop-close-button" type="button" data-sop-close aria-label="結束測量流程">
+              <span aria-hidden="true">×</span>
+              <small>結束</small>
+            </button>
+          </header>
+          <div class="sop-progress"><span style="width:100%"></span></div>
+          <main class="sop-content sop-summary-content">
+            <div class="sop-summary-hero">
+              <strong>${summary.measured.length} 項實測</strong>
+              <span>${summary.skipped.length} 項跳過／沿用</span>
+            </div>
+            <div class="sop-summary-list">
+              <article>
+                <span>本次有測量</span>
+                <strong>${labels(summary.measured)}</strong>
+              </article>
+              <article>
+                <span>跳過／沿用上一筆</span>
+                <strong>${labels(summary.skipped)}</strong>
+              </article>
+              <article class="is-recommendation">
+                <span>會參與滴定建議</span>
+                <strong>${labels(summary.recommendationEligible)}</strong>
+                <small>只有本次實測的 KH／CA／MG 會參與滴定微調。</small>
+              </article>
+            </div>
+            <div class="sop-note">
+              跳過項目會保持空白。儲存水質紀錄時，系統會沿用上一筆並標記為未實測，不會用來產生滴定調整。
+            </div>
+          </main>
+          <footer class="sop-actions sop-summary-actions">
+            <button class="primary-button" type="button" id="sopFinishBtn">返回測量表單</button>
+          </footer>
+        </section>
+      `;
+      root.querySelectorAll("[data-sop-close]").forEach((button) => button.addEventListener("click", close));
+      root.querySelector("#sopFinishBtn").addEventListener("click", () => {
+        close();
+        onToast("測量流程完成，請確認後儲存水質紀錄");
+      });
+      return;
+    }
+
     const currentSop = sop();
     const isResult = stepIndex >= currentSop.steps.length;
     const total = currentSop.steps.length + 1;
@@ -88,7 +147,10 @@ export function createMeasurementSopController({
             <p class="eyebrow">${currentSop.product}</p>
             <h3 id="sopTitle">${currentSop.label} 測量流程</h3>
           </div>
-          <button class="sop-close-button" type="button" data-sop-close aria-label="關閉測量流程">×</button>
+            <button class="sop-close-button" type="button" data-sop-close aria-label="結束測量流程">
+              <span aria-hidden="true">×</span>
+              <small>結束</small>
+            </button>
         </header>
 
         <div class="sop-progress" aria-label="測量進度">
@@ -144,13 +206,16 @@ export function createMeasurementSopController({
         </main>
 
         <footer class="sop-actions">
-          <button class="ghost-button" type="button" id="sopBackBtn" ${stepIndex === 0 ? "disabled" : ""}>上一步</button>
-          ${isResult
-            ? `<button class="primary-button" type="button" id="sopApplyBtn">帶入測量紀錄</button>`
-            : `<button class="primary-button" type="button" id="sopNextBtn">下一步</button>`}
+          <div class="sop-primary-actions">
+            <button class="ghost-button" type="button" id="sopBackBtn" ${stepIndex === 0 ? "disabled" : ""}>上一步</button>
+            ${isResult
+              ? `<button class="primary-button" type="button" id="sopApplyBtn">帶入測量紀錄</button>`
+              : `<button class="primary-button" type="button" id="sopNextBtn">下一步</button>`}
+          </div>
+          ${sequenceMode && nextParameter && isResult ? `<p class="sop-next-hint">帶入後將繼續下一項：${getMeasurementSop(nextParameter).label}</p>` : ""}
+          <button class="sop-skip-button" type="button" id="sopSkipBtn">跳過此項，沿用上一筆。</button>
+          <button class="sop-manual-button" type="button" data-sop-close>跳過 SOP，直接手動輸入</button>
         </footer>
-        <button class="sop-skip-button" type="button" data-sop-close>跳過 SOP 直接手動輸入</button>
-        ${sequenceMode && nextParameter && isResult ? `<p class="sop-next-hint">帶入後將繼續下一項：${getMeasurementSop(nextParameter).label}</p>` : ""}
       </section>
     `;
 
@@ -168,6 +233,28 @@ export function createMeasurementSopController({
     }
     const timerButton = root.querySelector("#sopTimerBtn");
     if (timerButton) timerButton.addEventListener("click", () => startTimer(currentStep.waitSeconds));
+    root.querySelector("#sopSkipBtn").addEventListener("click", () => {
+      const skippedSop = currentSop;
+      onSkip(parameter);
+      sequenceResults[parameter] = { status: "skipped" };
+      if (!sequenceMode) {
+        close();
+        onToast(`${skippedSop.label} 已跳過，儲存時將沿用上一筆`);
+        return;
+      }
+      const currentIndex = MEASUREMENT_SOP_ORDER.indexOf(parameter);
+      const next = MEASUREMENT_SOP_ORDER[currentIndex + 1];
+      if (next) {
+        parameter = next;
+        mode = getMeasurementSop(next).modes[0].value;
+        stepIndex = 0;
+        render();
+        onToast(`${skippedSop.label} 已跳過，繼續 ${getMeasurementSop(next).label}`);
+        return;
+      }
+      sequenceComplete = true;
+      render();
+    });
     const nextButton = root.querySelector("#sopNextBtn");
     if (nextButton) {
       nextButton.addEventListener("click", () => {
@@ -193,6 +280,7 @@ export function createMeasurementSopController({
           return;
         }
         onApply(result);
+        sequenceResults[parameter] = { status: "measured", ...result };
         const currentIndex = MEASUREMENT_SOP_ORDER.indexOf(parameter);
         const next = MEASUREMENT_SOP_ORDER[currentIndex + 1];
         if (sequenceMode && next) {
@@ -201,6 +289,11 @@ export function createMeasurementSopController({
           stepIndex = 0;
           render();
           onToast(`${currentSop.label} 已帶入，繼續 ${getMeasurementSop(next).label}`);
+          return;
+        }
+        if (sequenceMode) {
+          sequenceComplete = true;
+          render();
           return;
         }
         close();
@@ -217,6 +310,8 @@ export function createMeasurementSopController({
     mode = nextSop.modes[0].value;
     stepIndex = 0;
     sequenceMode = Boolean(options.sequence);
+    sequenceComplete = false;
+    sequenceResults = {};
     root.hidden = false;
     document.body.classList.add("sop-open");
     render();
