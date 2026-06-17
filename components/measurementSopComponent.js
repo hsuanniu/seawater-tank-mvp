@@ -24,6 +24,10 @@ export function createMeasurementSopController({
   let sequenceResults = {};
   let timerId = null;
   let timerRemaining = 0;
+  let timerStartedAt = null;
+  let timerDurationSeconds = 0;
+  let timerEndsAt = null;
+  let timerFinished = false;
 
   function sop() {
     return getMeasurementSop(parameter);
@@ -33,6 +37,10 @@ export function createMeasurementSopController({
     if (timerId) window.clearInterval(timerId);
     timerId = null;
     timerRemaining = 0;
+    timerStartedAt = null;
+    timerDurationSeconds = 0;
+    timerEndsAt = null;
+    timerFinished = false;
   }
 
   function close() {
@@ -47,32 +55,66 @@ export function createMeasurementSopController({
     return minutes ? `${minutes}:${seconds}` : `${timerRemaining} 秒`;
   }
 
+  function calculateTimerRemaining() {
+    if (!timerEndsAt) return timerRemaining;
+    return Math.max(0, Math.ceil((timerEndsAt - Date.now()) / 1000));
+  }
+
   function renderTimer() {
+    timerRemaining = calculateTimerRemaining();
     const display = root.querySelector("#sopTimerDisplay");
     const button = root.querySelector("#sopTimerBtn");
-    if (display) display.textContent = timerRemaining > 0 ? timerText() : "完成";
+    if (display) display.textContent = timerRemaining > 0 ? timerText() : timerFinished ? "時間到" : "完成";
     if (button) button.textContent = timerId ? "停止倒數" : timerRemaining > 0 ? "繼續倒數" : "重新倒數";
+  }
+
+  function finishTimer() {
+    if (timerId) window.clearInterval(timerId);
+    timerId = null;
+    timerEndsAt = null;
+    timerRemaining = 0;
+    timerFinished = true;
+    renderTimer();
+    onToast("等待時間完成");
+  }
+
+  function syncTimer() {
+    if (!timerEndsAt) return;
+    timerRemaining = calculateTimerRemaining();
+    if (timerRemaining <= 0) {
+      finishTimer();
+      return;
+    }
+    renderTimer();
   }
 
   function startTimer(seconds) {
     if (timerId) {
       window.clearInterval(timerId);
       timerId = null;
+      timerRemaining = calculateTimerRemaining();
+      timerEndsAt = null;
       renderTimer();
       return;
     }
+    timerDurationSeconds = seconds;
     if (timerRemaining <= 0) timerRemaining = seconds;
-    timerId = window.setInterval(() => {
-      timerRemaining -= 1;
-      renderTimer();
-      if (timerRemaining <= 0) {
-        clearTimer();
-        renderTimer();
-        onToast("等待時間完成");
-      }
-    }, 1000);
-    renderTimer();
+    timerFinished = false;
+    timerStartedAt = Date.now();
+    timerEndsAt = timerStartedAt + timerRemaining * 1000;
+    timerId = window.setInterval(syncTimer, 1000);
+    syncTimer();
   }
+
+  function syncTimerAfterResume() {
+    if (!timerId || !timerEndsAt) return;
+    syncTimer();
+  }
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") syncTimerAfterResume();
+  });
+  window.addEventListener("focus", syncTimerAfterResume);
 
   function render() {
     clearTimer();

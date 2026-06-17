@@ -66,8 +66,8 @@ export const MEASUREMENT_SOPS = {
       },
       {
         title: "一般判讀",
-        text: "將測試瓶放在色卡白色區域，由上往下看，讀取顏色對應數值。",
-        caution: "色卡單位為 ppm（mg/L）。",
+        text: "將測試瓶放在色卡白色區域旁，從側面平視觀察顏色，與色卡比對 NO3 數值。",
+        caution: "NO3 請平視比色，不是由上往下看；色卡單位為 ppm（mg/L）。",
       },
       {
         title: "低濃度判讀",

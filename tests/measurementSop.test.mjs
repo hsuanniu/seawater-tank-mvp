@@ -55,6 +55,15 @@ test("PO4 high-precision mode divides by two", () => {
   assert.equal(result.formula, "原始讀值 ÷ 2");
 });
 
+test("NO3 uses side-view color matching while PO4 keeps top-down color matching", () => {
+  const no3ReadingStep = getMeasurementSop("no3").steps.find((step) => step.title === "一般判讀");
+  const po4ReadingStep = getMeasurementSop("po4").steps.find((step) => step.title === "判讀顏色");
+
+  assert.match(stepText(no3ReadingStep, "standard"), /平視/);
+  assert.doesNotMatch(stepText(no3ReadingStep, "standard"), /由上往下|俯視/);
+  assert.match(stepText(po4ReadingStep, "standard"), /由上往下/);
+});
+
 test("MG and potassium keep user-entered ppm without invented conversion", () => {
   const mg = convertMeasurementReading({ parameter: "mg", rawValue: 1380, mode: "standard" });
   const potassium = convertMeasurementReading({ parameter: "k", rawValue: 410, mode: "standard" });

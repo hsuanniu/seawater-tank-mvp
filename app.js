@@ -1,5 +1,5 @@
 (function bootstrapModuleApp() {
-  const moduleSrc = "app.module.js?v=20260615-hide-cloud-nav";
+  const moduleSrc = "app.module.js?v=20260617-sop-timer-fix";
   const alreadyLoaded = Array.from(document.scripts).some((script) => script.src.includes("app.module.js"));
   if (alreadyLoaded) return;
 
