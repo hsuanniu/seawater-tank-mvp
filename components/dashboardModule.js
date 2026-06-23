@@ -17,6 +17,7 @@ export function primaryFocus(analysis) {
 export function actionText(action) {
   const labels = {
     MAINTAIN: "維持",
+    MICRO_ADJUST: "微調",
     INCREASE_SMALL: "小幅增加",
     DECREASE_SMALL: "小幅減少",
     OBSERVE: "觀察",

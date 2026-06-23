@@ -60,10 +60,17 @@ function rangeSide(value, targetRange) {
   return "inside";
 }
 
-function measuredValues(records, parameter) {
+function measuredRecords(records, parameter) {
   return getSortedRecords(records)
     .filter((record) => isMeasured(record, parameter) && Number.isFinite(Number(record[parameter])))
-    .map((record) => Number(record[parameter]));
+    .map((record) => ({
+      date: record.date,
+      value: Number(record[parameter]),
+    }));
+}
+
+function measuredValues(records, parameter) {
+  return measuredRecords(records, parameter).map((record) => record.value);
 }
 
 export function buildStabilityContext({
@@ -82,9 +89,13 @@ export function buildStabilityContext({
   const currentSide = rangeSide(currentValue, targetRange);
   const stabilityRange = STABILITY_RANGES[parameter] || targetRange;
   const inStabilityRange = rangeSide(currentValue, stabilityRange) === "inside";
-  const values = measuredValues(records, parameter);
+  const recentMeasuredRecords = measuredRecords(records, parameter);
+  const values = recentMeasuredRecords.map((record) => record.value);
   const fallbackValues = values.length ? values : [previousValue, currentValue].filter(Number.isFinite);
   let consecutiveOutOfRange = 0;
+  let consecutiveDrops = 0;
+  let consecutiveDropTotal = 0;
+  let consecutiveDropDays = 0;
 
   for (let index = fallbackValues.length - 1; index >= 0; index -= 1) {
     if (rangeSide(fallbackValues[index], targetRange) !== currentSide || currentSide === "inside") break;
@@ -97,6 +108,17 @@ export function buildStabilityContext({
     && daysBetweenTests >= 5
     && inStabilityRange,
   );
+  if (recentMeasuredRecords.length >= 3) {
+    const lastThree = recentMeasuredRecords.slice(-3);
+    const first = lastThree[0];
+    const middle = lastThree[1];
+    const latest = lastThree[2];
+    if (first.value > middle.value && middle.value > latest.value) {
+      consecutiveDrops = 2;
+      consecutiveDropTotal = Number((first.value - latest.value).toFixed(4));
+      consecutiveDropDays = daysBetween(first.date, latest.date) ?? 0;
+    }
+  }
 
   return {
     deadZone,
@@ -107,6 +129,9 @@ export function buildStabilityContext({
     inTargetRange: currentSide === "inside",
     inStabilityRange,
     consecutiveOutOfRange,
+    consecutiveDrops,
+    consecutiveDropTotal,
+    consecutiveDropDays,
     requiredOutOfRangeSamples: requiredSamples,
     hasConfirmedOutOfRange: currentSide !== "inside" && consecutiveOutOfRange >= requiredSamples,
   };

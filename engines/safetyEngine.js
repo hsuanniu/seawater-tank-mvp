@@ -55,6 +55,7 @@ function boundedDoseChange(
   recoveryContext = {},
   tankVolumeLiters,
   observeContext = {},
+  adjustmentProfile = "",
 ) {
   const limits = DOSING_LIMITS[parameter];
   if (!limits || !currentDoseMlPerDay || currentDoseMlPerDay <= 0) return 0;
@@ -65,9 +66,13 @@ function boundedDoseChange(
     baseLimit = currentDoseMlPerDay * recoveryLimit.percent;
   } else {
     const isNormalFineTune = statusCode === "NORMAL";
-    const percentLimit = currentDoseMlPerDay * (isNormalFineTune ? limits.normalPercent : limits.percent);
-    const mlLimit = isNormalFineTune ? limits.normalMaxMlChange : limits.maxMlChange;
-    baseLimit = Math.min(percentLimit, mlLimit);
+    if (adjustmentProfile === "KH_IN_RANGE_TREND_MICRO_ADJUST") {
+      baseLimit = Math.min(Math.max(currentDoseMlPerDay * 0.05, 0.5), 0.8);
+    } else {
+      const percentLimit = currentDoseMlPerDay * (isNormalFineTune ? limits.normalPercent : limits.percent);
+      const mlLimit = isNormalFineTune ? limits.normalMaxMlChange : limits.maxMlChange;
+      baseLimit = Math.min(percentLimit, mlLimit);
+    }
   }
 
   const nanoFactor = Number.isFinite(tankVolumeLiters) && tankVolumeLiters < 100 ? 0.5 : 1;
@@ -398,6 +403,21 @@ export function calculateDosingRecommendation({
   let reasonText = "目前在目標範圍內，優先維持。";
   const lowerZone = targetRange.min + targetSpan(targetRange) * 0.25;
   const upperZone = targetRange.max - targetSpan(targetRange) * 0.25;
+  const khDropFromPrevious = previousValue - currentValue;
+  const khInRangeTrendMicroAdjust = Boolean(
+    parameter === "kh"
+    && statusCode === "NORMAL"
+    && daysBetweenTests >= 5
+    && !speed.tooFast
+    && (
+      khDropFromPrevious >= 0.4
+      || (
+        stabilityContext.consecutiveDrops >= 2
+        && stabilityContext.consecutiveDropTotal >= 0.4
+        && stabilityContext.consecutiveDropDays >= 5
+      )
+    )
+  );
 
   if (statusCode === "CRITICAL_HIGH" || statusCode === "HIGH") {
     direction = -1;
@@ -425,6 +445,11 @@ export function calculateDosingRecommendation({
       reasonCode = "MG_LOW_OBSERVE_FIRST";
       reasonText = "MG 變化通常較慢，除非連續明顯低於目標，否則優先維持與觀察。";
     }
+  } else if (khInRangeTrendMicroAdjust) {
+    direction = 1;
+    action = "MICRO_ADJUST";
+    reasonCode = "KH_IN_RANGE_TREND_MICRO_ADJUST";
+    reasonText = "KH仍位於目標範圍，但消耗量略高於目前滴定量，建議小幅提高滴定以維持穩定。";
   } else if (statusCode === "NORMAL" && trendText === "下降" && currentValue <= lowerZone && !speed.tooFast) {
     direction = 1;
     action = "INCREASE_SMALL";
@@ -475,6 +500,7 @@ export function calculateDosingRecommendation({
     recoveryContext,
     tankVolumeLiters,
     observeContext,
+    khInRangeTrendMicroAdjust ? "KH_IN_RANGE_TREND_MICRO_ADJUST" : "",
   );
   if (doseChangeMlPerDay === 0) {
     return observeOnlyResult({

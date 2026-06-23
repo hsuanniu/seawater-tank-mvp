@@ -1,7 +1,7 @@
 import { nutrientFocusText, nutrientNotes } from "./components/aiExplanationModule.js";
-import { actionText, changeText, confidenceText, dailyDeltaText, doseSuggestionText, formatDoseSentence, primaryFocus } from "./components/dashboardModule.js?v=20260520-safety-ux";
+import { actionText, changeText, confidenceText, dailyDeltaText, doseSuggestionText, formatDoseSentence, primaryFocus } from "./components/dashboardModule.js?v=20260623-kh-trend-micro-adjust";
 import { createMeasurementSopController } from "./components/measurementSopComponent.js?v=20260617-sop-timer-fix";
-import { analyzeTank } from "./engines/analysisEngine.js?v=20260611-stable-lock";
+import { analyzeTank } from "./engines/analysisEngine.js?v=20260623-kh-trend-micro-adjust";
 import { additiveLabel, normalizeAdditiveLog } from "./modules/additiveLogModule.js?v=20260520-additive-feeding-log2";
 import { analyzeBioLoadReferences, WEEKDAYS } from "./modules/bioLoadModule.js?v=20260520-additive-feeding-log2";
 import { APPLICABLE_DOSE_KEYS, createDoseApplicationEntry, getDoseStatus as readDoseStatus } from "./modules/dosingModule.js?v=20260521-stability-tests";
@@ -18,8 +18,8 @@ const CLOUD_CONFIG_KEY = "seawaterTankCloudConfig.v1";
 const CLOUD_TABLE = "user_app_state";
 const APP_VERSION_STORAGE_KEY = "seawaterTankAppVersion.v1";
 const FALLBACK_VERSION = {
-  current_version: "2026.06.17-sop-timer-fix",
-  build_time: "2026-06-17T17:24:20+08:00",
+  current_version: "2026.06.23-kh-trend-micro-adjust",
+  build_time: "2026-06-23T13:55:58+08:00",
 };
 const DEBUG_MODE = false;
 let supabaseClient = null;
@@ -240,6 +240,7 @@ function reasonText(reasonCode) {
     WITHIN_TARGET: "位於目標範圍",
     HIGH_REDUCE_ONLY: "高於目標，只允許保守降低",
     LOW_SMALL_INCREASE: "低於目標，只允許小幅增加",
+    KH_IN_RANGE_TREND_MICRO_ADJUST: "目標內趨勢微調",
     NORMAL_NEAR_LOW_TREND_DOWN: "接近下緣且下降",
     NORMAL_NEAR_HIGH_TREND_UP: "接近上緣且上升",
     NO_AUTO_DOSING_FOR_PARAMETER: "此項目不提供自動滴定建議",

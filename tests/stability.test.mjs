@@ -279,6 +279,106 @@ test("Stable Lock keeps the real-world stable case unchanged", () => {
   assert.equal(analysis.rows.find((row) => row.key === "k").reasonCode, "VALUE_CARRIED_FORWARD");
 });
 
+test("KH inside target range micro-adjusts when the weekly downward trend is clear", () => {
+  const tank = {
+    ...DEFAULT_TANK,
+    volume: 200,
+    targets: {
+      ...DEFAULT_TANK.targets,
+      kh: { min: 8, max: 9 },
+    },
+  };
+  const analysis = analyzeTank({
+    tank,
+    records: [
+      completeMeasurement({ id: "kh-before", date: "2026-06-01", kh: 8.75 }),
+      completeMeasurement({ id: "kh-current", date: "2026-06-08", kh: 8.3 }),
+    ],
+    dosing: { kh: 10.2, ca: 4, mg: 1, status: {} },
+  });
+  const kh = analysis.rows.find((row) => row.key === "kh");
+
+  assert.equal(kh.reasonCode, "KH_IN_RANGE_TREND_MICRO_ADJUST");
+  assert.equal(kh.recommendationMode, "MICRO_ADJUST");
+  assert.equal(kh.doseChange, 0.5);
+  assert.equal(kh.newDose, 10.7);
+  assert.equal(kh.canApplyRecommendation, true);
+  assert.match(kh.recommendationReason, /KH仍位於目標範圍/);
+});
+
+test("KH enters trend micro-adjust mode after two consecutive drops inside target range", () => {
+  const tank = {
+    ...DEFAULT_TANK,
+    volume: 200,
+    targets: {
+      ...DEFAULT_TANK.targets,
+      kh: { min: 8, max: 9 },
+    },
+  };
+  const analysis = analyzeTank({
+    tank,
+    records: [
+      completeMeasurement({ id: "kh-first", date: "2026-06-01", kh: 8.75 }),
+      completeMeasurement({ id: "kh-second", date: "2026-06-08", kh: 8.55 }),
+      completeMeasurement({ id: "kh-third", date: "2026-06-15", kh: 8.3 }),
+    ],
+    dosing: { kh: 10.2, ca: 4, mg: 1, status: {} },
+  });
+  const kh = analysis.rows.find((row) => row.key === "kh");
+
+  assert.equal(kh.reasonCode, "KH_IN_RANGE_TREND_MICRO_ADJUST");
+  assert.equal(kh.doseChange, 0.5);
+  assert.equal(kh.newDose, 10.7);
+});
+
+test("KH in-range trend micro-adjust keeps nano tanks extra conservative", () => {
+  const tank = {
+    ...DEFAULT_TANK,
+    volume: 65,
+    targets: {
+      ...DEFAULT_TANK.targets,
+      kh: { min: 8, max: 9 },
+    },
+  };
+  const analysis = analyzeTank({
+    tank,
+    records: [
+      completeMeasurement({ id: "nano-kh-before", date: "2026-06-01", kh: 8.75 }),
+      completeMeasurement({ id: "nano-kh-current", date: "2026-06-08", kh: 8.3 }),
+    ],
+    dosing: { kh: 10.2, ca: 4, mg: 1, status: {} },
+  });
+  const kh = analysis.rows.find((row) => row.key === "kh");
+
+  assert.equal(kh.reasonCode, "KH_IN_RANGE_TREND_MICRO_ADJUST");
+  assert.ok(kh.doseChange > 0);
+  assert.ok(kh.doseChange < 0.5);
+  assert.ok(kh.doseChange <= 1);
+});
+
+test("KH inside target range maintains when movement is small and not a confirmed trend", () => {
+  const tank = {
+    ...DEFAULT_TANK,
+    targets: {
+      ...DEFAULT_TANK.targets,
+      kh: { min: 8, max: 9 },
+    },
+  };
+  const analysis = analyzeTank({
+    tank,
+    records: [
+      completeMeasurement({ id: "kh-before-small", date: "2026-06-01", kh: 8.75 }),
+      completeMeasurement({ id: "kh-current-small", date: "2026-06-08", kh: 8.5 }),
+    ],
+    dosing: { kh: 10.2, ca: 4, mg: 1, status: {} },
+  });
+  const kh = analysis.rows.find((row) => row.key === "kh");
+
+  assert.equal(kh.reasonCode, "WITHIN_TARGET");
+  assert.equal(kh.doseChange, 0);
+  assert.equal(kh.canApplyRecommendation, false);
+});
+
 test("Stable Lock also protects stable values when an older saved target range remains", () => {
   const legacyTank = {
     ...DEFAULT_TANK,
