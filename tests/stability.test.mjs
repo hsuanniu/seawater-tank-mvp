@@ -135,10 +135,71 @@ test("Safety Engine gives only conservative reminders outside KH, CA, and MG saf
     }));
 
     assert.equal(statusCode, "CRITICAL_HIGH", `${parameter} should classify as critical`);
-    assert.equal(result.reasonCode, "OUTSIDE_SAFE_CALCULATION_RANGE", parameter);
+    assert.equal(
+      ["OUTSIDE_SAFE_CALCULATION_RANGE", "MG_OBSERVATION_RANGE_EXCEEDED"].includes(result.reasonCode),
+      true,
+      parameter,
+    );
     assert.equal(result.canApply, false, parameter);
     assert.equal(result.doseChangeMlPerDay, 0, parameter);
+    assert.equal(result.autoCalculationPaused, true, parameter);
+    assert.equal(result.suggestedDoseLabel, "暫不自動計算", parameter);
   }
+});
+
+test("MG above observation range pauses auto calculation and asks for manual confirmation", () => {
+  const result = calculateDosingRecommendation(dosingInput("mg", {
+    currentValue: 1455,
+    previousValue: 1440,
+    targetRange: DEFAULT_TANK.targets.mg,
+    currentDoseMlPerDay: 0.8,
+    statusCode: classify(1455, DEFAULT_TANK.targets.mg, "mg").code,
+    trendText: "上升",
+  }));
+
+  assert.equal(result.reasonCode, "MG_CRITICAL_HIGH_RISING_MANUAL_CONFIRM");
+  assert.equal(result.action, "CONSIDER_REDUCE");
+  assert.equal(result.canApply, false);
+  assert.equal(result.doseChangeMlPerDay, 0);
+  assert.equal(result.autoCalculationPaused, true);
+  assert.equal(result.suggestedDoseLabel, "暫不自動計算");
+  assert.match(result.reasonText, /請考慮手動降低或暫停 Mg 滴定/);
+});
+
+test("Single high values observe without presenting the current dose as a recommendation", () => {
+  const result = calculateDosingRecommendation(dosingInput("ca", {
+    currentValue: 455,
+    previousValue: 430,
+    targetRange: DEFAULT_TANK.targets.ca,
+    currentDoseMlPerDay: 4,
+    statusCode: classify(455, DEFAULT_TANK.targets.ca, "ca").code,
+    trendText: "上升",
+  }));
+
+  assert.equal(result.reasonCode, "SINGLE_HIGH_OBSERVE");
+  assert.equal(result.action, "OBSERVE");
+  assert.equal(result.canApply, false);
+  assert.equal(result.autoCalculationPaused, true);
+  assert.equal(result.suggestedDoseLabel, "暫不自動計算");
+  assert.match(result.reasonText, /單次偏高/);
+});
+
+test("Consecutive high and rising values ask the user to consider reducing manually", () => {
+  const result = calculateDosingRecommendation(dosingInput("ca", {
+    currentValue: 462,
+    previousValue: 455,
+    targetRange: DEFAULT_TANK.targets.ca,
+    currentDoseMlPerDay: 4,
+    statusCode: classify(462, DEFAULT_TANK.targets.ca, "ca").code,
+    trendText: "上升",
+  }));
+
+  assert.equal(result.reasonCode, "CONSECUTIVE_HIGH_RISING_MANUAL_CONFIRM");
+  assert.equal(result.action, "CONSIDER_REDUCE");
+  assert.equal(result.canApply, false);
+  assert.equal(result.autoCalculationPaused, true);
+  assert.equal(result.suggestedDoseLabel, "暫不自動計算");
+  assert.match(result.reasonText, /連續偏高且上升/);
 });
 
 test("Event recovery mode keeps CA tube repair rises observe-only and below high confidence", () => {
@@ -406,7 +467,7 @@ test("Stable Lock also protects stable values when an older saved target range r
   }
 });
 
-test("CA waits for repeated out-of-range measurements before changing dose", () => {
+test("CA high readings avoid automatic dose changes and escalate by trend", () => {
   const firstAnalysis = analyzeTank({
     tank: DEFAULT_TANK,
     records: [
@@ -417,8 +478,9 @@ test("CA waits for repeated out-of-range measurements before changing dose", () 
   });
   const firstHigh = firstAnalysis.rows.find((row) => row.key === "ca");
 
-  assert.equal(firstHigh.reasonCode, "CA_WAIT_FOR_CONFIRMED_DEVIATION");
+  assert.equal(firstHigh.reasonCode, "SINGLE_HIGH_OBSERVE");
   assert.equal(firstHigh.doseChange, 0);
+  assert.equal(firstHigh.autoCalculationPaused, true);
 
   const confirmedAnalysis = analyzeTank({
     tank: DEFAULT_TANK,
@@ -431,8 +493,9 @@ test("CA waits for repeated out-of-range measurements before changing dose", () 
   });
   const confirmedHigh = confirmedAnalysis.rows.find((row) => row.key === "ca");
 
-  assert.equal(confirmedHigh.reasonCode, "HIGH_REDUCE_ONLY");
-  assert.equal(confirmedHigh.doseChange, -0.2);
+  assert.equal(confirmedHigh.reasonCode, "CONSECUTIVE_HIGH_RISING_MANUAL_CONFIRM");
+  assert.equal(confirmedHigh.doseChange, 0);
+  assert.equal(confirmedHigh.autoCalculationPaused, true);
 });
 
 test("Nano tanks and recent disruptive events reduce dosing adjustments", () => {

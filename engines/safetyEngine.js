@@ -148,13 +148,15 @@ function observeOnlyResult({
   recoveryContext = {},
   observeContext = {},
   warningMessage = "",
+  autoCalculationPaused = false,
+  action = "OBSERVE",
 }) {
   return {
     suggestedDoseMlPerDay: currentDoseMlPerDay,
     doseChangeMlPerDay: 0,
     recommended_dosing: currentDoseMlPerDay,
     adjustment_percentage: 0,
-    action: "OBSERVE",
+    action,
     reasonCode,
     reasonText,
     reason: reasonText,
@@ -169,6 +171,54 @@ function observeOnlyResult({
     observe_mode: Boolean(observeContext.observe_mode),
     affected_element: recoveryContext.affected_element || null,
     warning_message: warningMessage || (recoveryContext.event_recovery_mode ? recoveryWarning(recoveryContext.affected_element) : ""),
+    autoCalculationPaused,
+    suggestedDoseLabel: autoCalculationPaused ? "暫不自動計算" : "",
+  };
+}
+
+function isConsecutiveHighRising(currentValue, previousValue, targetRange) {
+  return Number.isFinite(previousValue)
+    && previousValue > targetRange.max
+    && currentValue > targetRange.max
+    && currentValue > previousValue;
+}
+
+function highRangeReason({ parameter, currentValue, previousValue, targetRange, statusCode }) {
+  const label = PARAMETERS.find((item) => item.key === parameter)?.label || parameter.toUpperCase();
+  const consecutiveHighRising = isConsecutiveHighRising(currentValue, previousValue, targetRange);
+  if (statusCode === "CRITICAL_HIGH") {
+    if (parameter === "mg") {
+      return {
+        reasonCode: consecutiveHighRising ? "MG_CRITICAL_HIGH_RISING_MANUAL_CONFIRM" : "MG_OBSERVATION_RANGE_EXCEEDED",
+        reasonText: consecutiveHighRising
+          ? "Mg 偏高且持續上升，請考慮手動降低或暫停 Mg 滴定。"
+          : "Mg 超出觀察範圍，暫不自動計算；請先人工確認測量值、鹽度與滴定狀態。",
+        action: consecutiveHighRising ? "CONSIDER_REDUCE" : "MANUAL_CONFIRM",
+        warning: "目前滴定量僅供參考，不代表最佳建議。",
+      };
+    }
+    return {
+      reasonCode: consecutiveHighRising ? "CRITICAL_HIGH_RISING_MANUAL_CONFIRM" : "OUTSIDE_SAFE_CALCULATION_RANGE",
+      reasonText: consecutiveHighRising
+        ? `${label} 連續偏高且上升，建議人工確認後再考慮降低或暫停滴定。`
+        : `${label} 超出安全計算範圍，暫不自動計算；請先人工確認測量值與設備狀態。`,
+      action: consecutiveHighRising ? "CONSIDER_REDUCE" : "MANUAL_CONFIRM",
+      warning: "目前滴定量僅供參考，不代表最佳建議。",
+    };
+  }
+  if (consecutiveHighRising) {
+    return {
+      reasonCode: "CONSECUTIVE_HIGH_RISING_MANUAL_CONFIRM",
+      reasonText: `${label} 連續偏高且上升，建議考慮降低或暫停滴定，但不要因單次數值做激進調整。`,
+      action: "CONSIDER_REDUCE",
+      warning: "連續偏高且上升，請先確認測試誤差、鹽度與滴定設備狀態。",
+    };
+  }
+  return {
+    reasonCode: "SINGLE_HIGH_OBSERVE",
+    reasonText: `${label} 單次偏高，建議先觀察，不急著調整。`,
+    action: "OBSERVE",
+    warning: "目前滴定量僅供參考，不代表最佳建議。",
   };
 }
 
@@ -342,17 +392,38 @@ export function calculateDosingRecommendation({
     });
   }
 
-  if (statusCode === "CRITICAL_LOW" || statusCode === "CRITICAL_HIGH") {
-    safetyWarnings.push("目前數值超出保守計算範圍，請先確認測試結果、鹽度與設備狀態。");
+  if (statusCode === "CRITICAL_HIGH") {
+    const highReason = highRangeReason({ parameter, currentValue, previousValue, targetRange, statusCode });
+    safetyWarnings.push(highReason.warning);
     return observeOnlyResult({
       currentDoseMlPerDay,
-      reasonCode: "OUTSIDE_SAFE_CALCULATION_RANGE",
-      reasonText: "目前數值超出安全計算範圍，保守模式不產生新的滴定數字。",
+      reasonCode: highReason.reasonCode,
+      reasonText: highReason.reasonText,
       safetyWarnings,
       dailyDelta,
       speed,
       recoveryContext,
       observeContext,
+      autoCalculationPaused: true,
+      action: highReason.action,
+      warningMessage: highReason.warning,
+    });
+  }
+
+  if (statusCode === "CRITICAL_LOW") {
+    safetyWarnings.push("目前數值超出保守計算範圍，請先確認測試結果、鹽度與設備狀態。");
+    return observeOnlyResult({
+      currentDoseMlPerDay,
+      reasonCode: "OUTSIDE_SAFE_CALCULATION_RANGE",
+      reasonText: "目前數值超出安全計算範圍，暫不自動計算；請先人工確認測量值、鹽度與設備狀態。",
+      safetyWarnings,
+      dailyDelta,
+      speed,
+      recoveryContext,
+      observeContext,
+      autoCalculationPaused: true,
+      action: "MANUAL_CONFIRM",
+      warningMessage: "目前滴定量僅供參考，不代表最佳建議。",
     });
   }
 
@@ -376,6 +447,25 @@ export function calculateDosingRecommendation({
       speed,
       recoveryContext,
       observeContext,
+    });
+  }
+
+  if (statusCode === "HIGH") {
+    const highReason = highRangeReason({ parameter, currentValue, previousValue, targetRange, statusCode });
+    safetyWarnings.push(highReason.warning);
+    return observeOnlyResult({
+      currentDoseMlPerDay,
+      reasonCode: highReason.reasonCode,
+      reasonText: highReason.reasonText,
+      safetyWarnings,
+      confidenceLevel,
+      dailyDelta,
+      speed,
+      recoveryContext,
+      observeContext,
+      autoCalculationPaused: true,
+      action: highReason.action,
+      warningMessage: highReason.warning,
     });
   }
 

@@ -1,7 +1,7 @@
 import { nutrientFocusText, nutrientNotes } from "./components/aiExplanationModule.js";
-import { actionText, changeText, confidenceText, dailyDeltaText, doseSuggestionText, formatDoseSentence, primaryFocus } from "./components/dashboardModule.js?v=20260623-kh-trend-micro-adjust";
+import { actionText, changeText, confidenceText, dailyDeltaText, doseSuggestionText, formatDoseSentence, primaryFocus } from "./components/dashboardModule.js?v=20260706-dosing-manual-confirm";
 import { createMeasurementSopController } from "./components/measurementSopComponent.js?v=20260617-sop-timer-fix";
-import { analyzeTank } from "./engines/analysisEngine.js?v=20260623-kh-trend-micro-adjust";
+import { analyzeTank } from "./engines/analysisEngine.js?v=20260706-dosing-manual-confirm";
 import { additiveLabel, normalizeAdditiveLog } from "./modules/additiveLogModule.js?v=20260520-additive-feeding-log2";
 import { analyzeBioLoadReferences, WEEKDAYS } from "./modules/bioLoadModule.js?v=20260520-additive-feeding-log2";
 import { APPLICABLE_DOSE_KEYS, createDoseApplicationEntry, getDoseStatus as readDoseStatus } from "./modules/dosingModule.js?v=20260521-stability-tests";
@@ -18,8 +18,8 @@ const CLOUD_CONFIG_KEY = "seawaterTankCloudConfig.v1";
 const CLOUD_TABLE = "user_app_state";
 const APP_VERSION_STORAGE_KEY = "seawaterTankAppVersion.v1";
 const FALLBACK_VERSION = {
-  current_version: "2026.06.23-kh-trend-micro-adjust",
-  build_time: "2026-06-23T13:55:58+08:00",
+  current_version: "2026.07.06-dosing-manual-confirm",
+  build_time: "2026-07-06T10:16:40+08:00",
 };
 const DEBUG_MODE = false;
 let supabaseClient = null;
@@ -235,6 +235,11 @@ function reasonText(reasonCode) {
     TREND_TOO_FAST_VERIFY_FIRST: "變化偏快，需先確認",
     VALUE_CARRIED_FORWARD: "本次未實測，沿用上一筆",
     OUTSIDE_SAFE_CALCULATION_RANGE: "超出安全計算範圍",
+    SINGLE_HIGH_OBSERVE: "單次偏高，先觀察",
+    CONSECUTIVE_HIGH_RISING_MANUAL_CONFIRM: "連續偏高且上升",
+    CRITICAL_HIGH_RISING_MANUAL_CONFIRM: "嚴重偏高且持續上升",
+    MG_OBSERVATION_RANGE_EXCEEDED: "MG 超出觀察範圍",
+    MG_CRITICAL_HIGH_RISING_MANUAL_CONFIRM: "MG 偏高且持續上升",
     DOSER_DISABLED: "滴定目前關閉",
     DOSING_PAUSED_THIS_WEEK: "本週曾暫停滴定",
     WITHIN_TARGET: "位於目標範圍",
@@ -261,6 +266,8 @@ function recommendationProblem(row) {
 
 function recommendationAction(row) {
   if (row.reasonCode === "ZERO_CURRENT_DOSE") return "請先輸入目前固定滴定量，建立基準後再讓系統計算微調。";
+  if (row.autoCalculationPaused && row.recommendationMode === "CONSIDER_REDUCE") return "暫不自動計算。建議人工確認測量值與設備狀態後，再考慮降低或暫停滴定。";
+  if (row.autoCalculationPaused) return "暫不自動計算。建議人工確認，並持續觀察下一次測量趨勢。";
   if (!row.canApplyRecommendation) return "目前資料不足，建議持續觀察與建立基準資料。";
   if (row.doseChange > 0) return `可小幅增加至 ${formatNumber(row.newDose)} ml/day，並於下次測量後再確認。`;
   if (row.doseChange < 0) return `可小幅降低至 ${formatNumber(row.newDose)} ml/day，並於下次測量後再確認。`;
@@ -646,10 +653,17 @@ function recommendationCard(row) {
     : "<li>無額外安全提醒。</li>";
   const canApply = row.canApplyRecommendation && APPLICABLE_DOSE_KEYS.includes(row.key);
   const needsBaseline = row.reasonCode === "ZERO_CURRENT_DOSE";
+  const autoPaused = row.autoCalculationPaused;
   const doseCompare = needsBaseline
     ? `<div class="baseline-empty">
         <strong>請先建立滴定基準</strong>
         <span>請先輸入目前固定滴定量，系統才會開始計算微調建議。</span>
+      </div>`
+    : autoPaused
+      ? `<div class="dose-compare">
+        <div><span>目前</span><strong>${formatNumber(row.currentDose)} ml/day</strong></div>
+        <div><span>建議</span><strong>暫不自動計算</strong></div>
+        <div><span>動作</span><strong>${actionText(row.recommendationMode)}</strong></div>
       </div>`
     : `<div class="dose-compare">
         <div><span>目前</span><strong>${formatNumber(row.currentDose)} ml/day</strong></div>

@@ -21,6 +21,8 @@ export function actionText(action) {
     INCREASE_SMALL: "小幅增加",
     DECREASE_SMALL: "小幅減少",
     OBSERVE: "觀察",
+    MANUAL_CONFIRM: "人工確認",
+    CONSIDER_REDUCE: "考慮降低",
     RESUME_THEN_OBSERVE: "恢復後觀察",
     DO_NOT_DOSE: "先不調整",
   };
@@ -51,6 +53,7 @@ export function dailyDeltaText(row) {
 export function formatDoseSentence(row, doseStatusText) {
   if (row.isMeasured === false) return `${row.label} 這次未測量，沿用上一筆數值，建議先觀察不調整。`;
   if (row.reasonCode === "ZERO_CURRENT_DOSE") return `尚未建立 ${row.label} 滴定基準，請先輸入目前固定滴定量。`;
+  if (row.autoCalculationPaused) return `${row.label} 暫不自動計算；目前滴定量僅供參考，請人工確認。`;
   if (row.recommendationMode === "DO_NOT_DOSE") return `${row.label} 滴定${doseStatusText(row.doseKey)}，先確認設備狀態，不自動放大補量。`;
   if (row.recommendationMode === "RESUME_THEN_OBSERVE") return `${row.label} ${doseStatusText(row.doseKey)}，建議恢復原本 ${formatNumber(row.currentDose)} ml/day 後觀察。`;
   if (row.rate === 0) return `${row.label} 目前建議維持 ${formatNumber(row.currentDose)} ml/day。`;
@@ -62,6 +65,7 @@ export function doseSuggestionText(row, doseStatusText) {
   const status = doseStatusText(row.doseKey);
   if (row.reasonCode === "ZERO_CURRENT_DOSE") return `尚未建立 ${row.label} 滴定基準`;
   if (row.isMeasured === false) return `目前 ${current}，本次未測量，建議維持觀察`;
+  if (row.autoCalculationPaused) return `目前 ${current}，建議暫不自動計算`;
   if (row.recommendationMode === "DO_NOT_DOSE") return `目前 ${current}，${status}，建議先確認設備或手動恢復後再測一次`;
   if (row.recommendationMode === "RESUME_THEN_OBSERVE") return `目前 ${current}，${status}，建議恢復原本滴定量並觀察`;
   if (row.rate === 0) return `目前 ${current}，建議維持`;

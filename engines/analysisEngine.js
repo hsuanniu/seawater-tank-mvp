@@ -3,8 +3,8 @@ import { daysBetweenRecords, latestRecords } from "../modules/measurementModule.
 import { PARAMETERS } from "../modules/tankModule.js";
 import { toNumber } from "../services/formatService.js";
 import { buildRecoveryContext, recoveryContextForElement } from "./eventRecoveryEngine.js";
-import { buildObserveContext, buildStabilityContext } from "./stabilityEngine.js?v=20260623-kh-trend-micro-adjust";
-import { calculateDosingRecommendation, classify, trend } from "./safetyEngine.js?v=20260623-kh-trend-micro-adjust";
+import { buildObserveContext, buildStabilityContext } from "./stabilityEngine.js?v=20260706-dosing-manual-confirm";
+import { calculateDosingRecommendation, classify, trend } from "./safetyEngine.js?v=20260706-dosing-manual-confirm";
 
 export function analyzeTank({
   tank,
@@ -103,6 +103,9 @@ export function analyzeTank({
     if (param.key === "k") action = "觀察";
     if (param.key === "no3" || param.key === "po4") action = "觀察";
     if (isDosePaused) action = "觀察";
+    if (recommendation.autoCalculationPaused) {
+      action = recommendation.action === "CONSIDER_REDUCE" ? "考慮降低" : "人工確認";
+    }
 
     return {
       ...param,
@@ -130,6 +133,8 @@ export function analyzeTank({
       trendTooFast: recommendation.trendTooFast,
       trendSpeedText: recommendation.trendSpeedText,
       recommended_dosing: recommendation.recommended_dosing,
+      suggestedDoseLabel: recommendation.suggestedDoseLabel || "",
+      autoCalculationPaused: Boolean(recommendation.autoCalculationPaused),
       adjustment_percentage: recommendation.adjustment_percentage,
       event_recovery_mode: recommendation.event_recovery_mode,
       affected_element: recommendation.affected_element,
