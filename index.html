@@ -4,10 +4,10 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>海水缸水質追蹤與滴定調整工具</title>
-    <meta name="theme-color" content="#0b2f48" />
+    <meta name="theme-color" content="#e9f8fb" />
     <link rel="manifest" href="manifest.webmanifest" />
     <link rel="apple-touch-icon" href="icons/icon-192.svg" />
-    <link rel="stylesheet" href="styles.css?v=20260706-dosing-manual-confirm" />
+    <link rel="stylesheet" href="styles.css?v=20260708-ocean-light-ui" />
   </head>
   <body>
     <div class="app-shell">
@@ -497,13 +497,14 @@
 
     <nav class="mobile-bottom-nav" aria-label="手機快速導覽">
       <button class="nav-link mobile-nav-link active" data-section="dashboard">首頁</button>
-      <button class="nav-link mobile-nav-link mobile-nav-primary" data-section="water">新增測量</button>
-      <button class="nav-link mobile-nav-link" data-section="history">歷史</button>
+      <button class="nav-link mobile-nav-link mobile-nav-primary" data-section="water">測量</button>
+      <button class="nav-link mobile-nav-link" data-section="dosing">滴定</button>
+      <button class="nav-link mobile-nav-link" data-section="history">紀錄</button>
       <button class="nav-link mobile-nav-link" data-section="tank">設定</button>
     </nav>
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script type="module" src="app.module.js?v=20260706-dosing-manual-confirm"></script>
-    <script defer src="app.js?v=20260706-dosing-manual-confirm"></script>
+    <script type="module" src="app.module.js?v=20260708-ocean-light-ui"></script>
+    <script defer src="app.js?v=20260708-ocean-light-ui"></script>
   </body>
 </html>

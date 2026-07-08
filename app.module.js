@@ -18,8 +18,8 @@ const CLOUD_CONFIG_KEY = "seawaterTankCloudConfig.v1";
 const CLOUD_TABLE = "user_app_state";
 const APP_VERSION_STORAGE_KEY = "seawaterTankAppVersion.v1";
 const FALLBACK_VERSION = {
-  current_version: "2026.07.06-dosing-manual-confirm",
-  build_time: "2026-07-06T10:16:40+08:00",
+  current_version: "2026.07.08-ocean-light-ui",
+  build_time: "2026-07-08T16:09:50+08:00",
 };
 const DEBUG_MODE = false;
 let supabaseClient = null;
@@ -595,8 +595,9 @@ function renderDashboard() {
   const analysis = analyze();
   const tank = tankSettings();
   document.querySelector("#tankNameDisplay").textContent = tank.name;
+  const salinityText = analysis?.latest?.salinity ? ` | 比重 ${formatNumber(analysis.latest.salinity, 3)}` : "";
   document.querySelector("#dashboardMeta").textContent = analysis
-    ? `${tank.volume} L | 最新紀錄 ${analysis.latest.date}${analysis.daysSincePrevious !== null ? ` | 距上次 ${analysis.daysSincePrevious} 天` : ""}`
+    ? `${tank.volume} L${salinityText} | 最新紀錄 ${analysis.latest.date}${analysis.daysSincePrevious !== null ? ` | 距上次 ${analysis.daysSincePrevious} 天` : ""}`
     : `${tank.volume} L | 尚未建立紀錄`;
 
   const cards = document.querySelector("#latestCards");
