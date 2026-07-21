@@ -7,7 +7,7 @@
     <meta name="theme-color" content="#e9f8fb" />
     <link rel="manifest" href="manifest.webmanifest" />
     <link rel="apple-touch-icon" href="icons/icon-192.svg" />
-    <link rel="stylesheet" href="styles.css?v=20260721-tank-header-title" />
+    <link rel="stylesheet" href="styles.css?v=20260721-simplified-nav" />
   </head>
   <body>
     <div class="app-shell">
@@ -19,17 +19,6 @@
             <p>水質追蹤與滴定建議</p>
           </div>
         </div>
-        <nav class="nav" aria-label="主要導覽">
-          <button class="nav-link active" data-section="dashboard">首頁</button>
-          <button class="nav-link" data-section="tank">魚缸設定</button>
-          <button class="nav-link" data-section="water">新增水質紀錄</button>
-          <button class="nav-link" data-section="dosing">滴定設定</button>
-          <button class="nav-link" data-section="bio-load">生物負載</button>
-          <button class="nav-link" data-section="analysis">分析結果</button>
-          <button class="nav-link" data-section="history">歷史紀錄</button>
-          <button class="nav-link" data-section="trends">趨勢圖表</button>
-          <button class="nav-link" data-section="cloud" hidden>雲端同步</button>
-        </nav>
       </aside>
 
       <main class="content">
@@ -80,6 +69,15 @@
         </section>
 
         <section id="tank" class="page">
+          <article class="panel form-panel">
+            <div class="panel-heading">
+              <h3>設定</h3>
+              <span class="badge muted">管理入口</span>
+            </div>
+            <div class="button-row settings-shortcuts">
+              <button class="ghost-button" type="button" data-goto="bio-load">生物負載</button>
+            </div>
+          </article>
           <form id="tankForm" class="panel form-panel">
             <div class="panel-heading">
               <h3 id="tankFormTitle">魚缸基本設定</h3>
@@ -442,6 +440,7 @@
                 <p id="historyMeta" class="panel-subtitle">目前 0 筆</p>
               </div>
               <div class="history-actions">
+                <button class="ghost-button" type="button" data-goto="trends">趨勢圖表</button>
                 <button class="ghost-button" id="toggleArchiveBtn" type="button">查看封存</button>
                 <button class="ghost-button" id="exportAllRecordsBtn" type="button">匯出全部紀錄</button>
                 <button class="danger-button" id="clearArchiveBtn" type="button">清除封存</button>

@@ -1273,14 +1273,37 @@ function pageIdFromHash() {
   return document.querySelector(`.page#${CSS.escape(id)}`) ? id : "dashboard";
 }
 
+function navSectionForPage(id) {
+  if (["history", "trends"].includes(id)) return "history";
+  if (["tank", "bio-load", "cloud"].includes(id)) return "tank";
+  if (id === "analysis") return "dashboard";
+  return id;
+}
+
+function pageTitleFor(id) {
+  const titles = {
+    dashboard: "首頁",
+    water: "測量",
+    dosing: "滴定",
+    history: "紀錄",
+    trends: "趨勢圖表",
+    tank: "設定",
+    "bio-load": "生物負載",
+    analysis: "分析結果",
+    cloud: "雲端同步",
+  };
+  return titles[id] || "首頁";
+}
+
 function switchPage(id, { updateRoute = true } = {}) {
   if (!hasTanks() && id !== "tank") id = "tank";
   if (id === "tank" && hasTanks() && tankFormMode !== "create") tankFormMode = "edit";
+  const activeNavSection = navSectionForPage(id);
   document.querySelectorAll(".page").forEach((page) => page.classList.toggle("active", page.id === id));
-  document.querySelectorAll(".nav-link").forEach((link) => link.classList.toggle("active", link.dataset.section === id));
+  document.querySelectorAll(".nav-link").forEach((link) => link.classList.toggle("active", link.dataset.section === activeNavSection));
   document.querySelector("#pageTitle").textContent = !hasTanks()
     ? "建立第一個魚缸"
-    : document.querySelector(`.nav-link[data-section="${id}"]`)?.textContent || "首頁";
+    : pageTitleFor(id);
   if (updateRoute && window.location.hash !== `#${id}`) {
     history.replaceState(null, "", `#${id}`);
   }
