@@ -761,7 +761,8 @@ body.sop-open {
 
 .tank-switcher {
   position: relative;
-  min-width: 190px;
+  width: min(100%, 560px);
+  min-width: 0;
 }
 
 .dashboard-tank-row {
@@ -788,28 +789,60 @@ body.sop-open {
 }
 
 .tank-switcher-button.compact {
-  justify-content: flex-start;
-  width: auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  justify-content: stretch;
+  column-gap: 14px;
+  width: 100%;
   min-width: 0;
   max-width: 100%;
-  min-height: 38px;
-  padding: 7px 10px;
-  border-radius: 12px;
+  min-height: 74px;
+  padding: 12px 14px;
+  border-color: rgba(185, 220, 227, 0.72);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.58);
   box-shadow: none;
 }
 
+.tank-switcher-button.compact:hover,
+.tank-switcher-button.compact:focus-visible {
+  border-color: rgba(8, 127, 160, 0.36);
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.tank-header-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  text-align: left;
+}
+
 .tank-switcher-button.compact #tankMenuLabel {
+  display: -webkit-box;
   min-width: 0;
   overflow: hidden;
+  color: var(--ink);
+  font-size: 28px;
+  font-weight: 850;
+  line-height: 1.12;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .tank-menu-volume {
-  flex: 0 0 auto;
   color: var(--muted);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 850;
+}
+
+.tank-header-arrow {
+  align-self: center;
+  color: var(--blue);
+  font-size: 14px;
+  opacity: 0.72;
 }
 
 .tank-menu {
@@ -2064,6 +2097,18 @@ th {
 
   .tank-switcher-button.compact {
     width: 100%;
+    min-height: 68px;
+    padding: 11px 12px;
+    column-gap: 10px;
+  }
+
+  .tank-switcher-button.compact #tankMenuLabel {
+    font-size: 24px;
+    line-height: 1.1;
+  }
+
+  .tank-menu-volume {
+    font-size: 13px;
   }
 
   .tank-menu {

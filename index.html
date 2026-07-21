@@ -7,7 +7,7 @@
     <meta name="theme-color" content="#e9f8fb" />
     <link rel="manifest" href="manifest.webmanifest" />
     <link rel="apple-touch-icon" href="icons/icon-192.svg" />
-    <link rel="stylesheet" href="styles.css?v=20260721-home-header-cleanup" />
+    <link rel="stylesheet" href="styles.css?v=20260721-tank-header-title" />
   </head>
   <body>
     <div class="app-shell">
@@ -40,9 +40,11 @@
           <div class="dashboard-tank-row">
             <div class="tank-switcher" id="tankSwitcher">
               <button class="tank-switcher-button compact" id="tankMenuButton" type="button" aria-haspopup="dialog" aria-expanded="false">
-                <span id="tankMenuLabel">選擇魚缸</span>
-                <span id="tankMenuVolume" class="tank-menu-volume"></span>
-                <span aria-hidden="true">▼</span>
+                <span class="tank-header-copy">
+                  <span id="tankMenuLabel">選擇魚缸</span>
+                  <span id="tankMenuVolume" class="tank-menu-volume"></span>
+                </span>
+                <span class="tank-header-arrow" aria-hidden="true">▼</span>
               </button>
               <div class="tank-menu" id="tankMenu" hidden></div>
             </div>
