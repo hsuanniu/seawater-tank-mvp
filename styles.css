@@ -184,7 +184,10 @@ button {
 }
 
 .mobile-bottom-nav .nav-link {
+  width: 100%;
+  min-width: 0;
   min-height: 50px;
+  height: 50px;
   padding: 8px 4px;
   border-color: transparent;
   border-radius: 16px;
@@ -193,6 +196,7 @@ button {
   font-size: 12px;
   font-weight: 850;
   line-height: 1.2;
+  overflow: hidden;
 }
 
 .mobile-bottom-nav .nav-link.active {
@@ -2618,13 +2622,16 @@ th {
   .mobile-bottom-nav {
     right: 8px;
     left: 8px;
+    width: auto;
     gap: 3px;
     padding: 5px;
     border-radius: 20px;
+    transform: none;
   }
 
   .mobile-bottom-nav .nav-link {
     min-height: 46px;
+    height: 46px;
     padding: 7px 2px;
     font-size: 10.5px;
   }
