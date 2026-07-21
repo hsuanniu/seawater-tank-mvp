@@ -573,12 +573,14 @@ function renderTankSwitcher() {
   const switcher = document.querySelector("#tankSwitcher");
   const menuButton = document.querySelector("#tankMenuButton");
   const menuLabel = document.querySelector("#tankMenuLabel");
+  const menuVolume = document.querySelector("#tankMenuVolume");
   const menu = document.querySelector("#tankMenu");
   const deleteButton = document.querySelector("#deleteTankBtn");
   const storeState = TankStore.getState();
   const active = storeState.tanks.find((tank) => tank.id === storeState.activeTankId) || storeState.tanks[0] || null;
   if (switcher) switcher.hidden = storeState.tanks.length === 0;
   if (menuLabel) menuLabel.textContent = active?.tank.name || "選擇魚缸";
+  if (menuVolume) menuVolume.textContent = active ? `${formatNumber(active.tank.volume, 0)} L` : "";
   if (menuButton) menuButton.setAttribute("aria-expanded", menu && !menu.hidden ? "true" : "false");
   if (menu) {
     menu.innerHTML = `
@@ -1268,7 +1270,12 @@ function showSavedFeedback(button, message = "已儲存") {
   }, 1600);
 }
 
-function switchPage(id) {
+function pageIdFromHash() {
+  const id = window.location.hash.replace(/^#/, "");
+  return document.querySelector(`.page#${CSS.escape(id)}`) ? id : "dashboard";
+}
+
+function switchPage(id, { updateRoute = true } = {}) {
   if (!hasTanks() && id !== "tank") id = "tank";
   if (id === "tank" && hasTanks() && tankFormMode !== "create") tankFormMode = "edit";
   document.querySelectorAll(".page").forEach((page) => page.classList.toggle("active", page.id === id));
@@ -1276,6 +1283,9 @@ function switchPage(id) {
   document.querySelector("#pageTitle").textContent = !hasTanks()
     ? "建立第一個魚缸"
     : document.querySelector(`.nav-link[data-section="${id}"]`)?.textContent || "首頁";
+  if (updateRoute && window.location.hash !== `#${id}`) {
+    history.replaceState(null, "", `#${id}`);
+  }
   if (id === "analysis") renderAnalysis();
   if (id === "dosing") renderDosingSavedMeta();
   if (id === "tank") renderForms();
@@ -1940,6 +1950,10 @@ function setupEvents() {
     historyMode = "active";
     showToast(`已清除 ${result.deletedCount} 筆封存紀錄。`);
   });
+
+  window.addEventListener("hashchange", () => {
+    switchPage(pageIdFromHash(), { updateRoute: false });
+  });
 }
 
 setupServiceWorkerUpdates();
@@ -1947,6 +1961,7 @@ checkAppVersion();
 setupEvents();
 TankStore.runRetentionCleanup();
 renderAll();
+switchPage(pageIdFromHash(), { updateRoute: false });
 initSupabaseClient();
 refreshCloudSession();
 

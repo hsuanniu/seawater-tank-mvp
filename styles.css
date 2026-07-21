@@ -169,13 +169,8 @@ button {
   justify-content: space-between;
   gap: 18px;
   align-items: center;
-  margin-bottom: 22px;
-  padding: 14px 16px;
-  border: 1px solid rgba(207, 226, 232, 0.82);
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.74);
-  box-shadow: 0 14px 34px rgba(7, 70, 94, 0.08);
-  backdrop-filter: blur(16px);
+  margin-bottom: 10px;
+  padding: 0 2px;
 }
 
 .eyebrow {
@@ -189,7 +184,7 @@ button {
 
 .topbar h2 {
   margin: 0;
-  font-size: 28px;
+  font-size: 24px;
 }
 
 .topbar-actions {
@@ -207,6 +202,12 @@ button {
   border: 1px solid rgba(216, 228, 232, 0.9);
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.8);
+}
+
+.settings-backup-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  max-width: 420px;
 }
 
 .backup-actions .ghost-button {
@@ -751,6 +752,12 @@ body.sop-open {
   min-width: 190px;
 }
 
+.dashboard-tank-row {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
 .tank-switcher-button {
   display: flex;
   align-items: center;
@@ -766,6 +773,31 @@ body.sop-open {
   font-size: 14px;
   font-weight: 850;
   box-shadow: 0 12px 28px rgba(25, 69, 84, 0.08);
+}
+
+.tank-switcher-button.compact {
+  justify-content: flex-start;
+  width: auto;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 38px;
+  padding: 7px 10px;
+  border-radius: 12px;
+  box-shadow: none;
+}
+
+.tank-switcher-button.compact #tankMenuLabel {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tank-menu-volume {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 850;
 }
 
 .tank-menu {
@@ -886,7 +918,7 @@ body.sop-open {
 
 .dashboard-hero {
   position: relative;
-  padding: 22px;
+  padding: 18px;
   border-color: rgba(8, 127, 160, 0.16);
   background:
     linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(231, 251, 245, 0.78)),
@@ -895,7 +927,7 @@ body.sop-open {
 }
 
 .dashboard-hero h3 {
-  font-size: 26px;
+  font-size: 24px;
   letter-spacing: 0;
 }
 
@@ -1997,7 +2029,7 @@ th {
 
   .topbar {
     gap: 12px;
-    margin-bottom: 14px;
+    margin-bottom: 8px;
   }
 
   .topbar-actions {
@@ -2008,6 +2040,11 @@ th {
 
   .tank-switcher {
     min-width: 0;
+    max-width: 100%;
+  }
+
+  .tank-switcher-button.compact {
+    width: 100%;
   }
 
   .tank-menu {
@@ -2041,6 +2078,15 @@ th {
     width: 100%;
     min-height: 42px;
     text-align: center;
+  }
+
+  .dashboard-hero {
+    gap: 12px;
+    padding: 16px;
+  }
+
+  .dashboard-hero h3 {
+    font-size: 22px;
   }
 
   .panel,

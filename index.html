@@ -7,7 +7,7 @@
     <meta name="theme-color" content="#e9f8fb" />
     <link rel="manifest" href="manifest.webmanifest" />
     <link rel="apple-touch-icon" href="icons/icon-192.svg" />
-    <link rel="stylesheet" href="styles.css?v=20260721-tank-switcher-flow" />
+    <link rel="stylesheet" href="styles.css?v=20260721-home-priority" />
   </head>
   <body>
     <div class="app-shell">
@@ -38,30 +38,20 @@
             <p class="eyebrow">MVP 單機版</p>
             <h2 id="pageTitle">首頁</h2>
           </div>
-          <div class="topbar-actions">
+        </header>
+        <div id="appFeedback" class="app-feedback" role="status" aria-live="polite"></div>
+
+        <section id="dashboard" class="page active">
+          <div class="dashboard-tank-row">
             <div class="tank-switcher" id="tankSwitcher">
-              <button class="tank-switcher-button" id="tankMenuButton" type="button" aria-haspopup="dialog" aria-expanded="false">
+              <button class="tank-switcher-button compact" id="tankMenuButton" type="button" aria-haspopup="dialog" aria-expanded="false">
                 <span id="tankMenuLabel">選擇魚缸</span>
+                <span id="tankMenuVolume" class="tank-menu-volume"></span>
                 <span aria-hidden="true">▼</span>
               </button>
               <div class="tank-menu" id="tankMenu" hidden></div>
             </div>
-            <div class="backup-actions" aria-label="資料備份">
-              <button class="ghost-button" id="exportBtn" title="下載這台裝置目前的資料備份">下載備份</button>
-              <label class="ghost-button file-button" title="選擇備份檔，確認後覆蓋這台裝置資料">
-                用備份還原
-                <input id="importInput" type="file" accept="application/json" />
-              </label>
-            </div>
           </div>
-        </header>
-        <div id="appFeedback" class="app-feedback" role="status" aria-live="polite"></div>
-        <div id="versionPanel" class="version-panel" aria-live="polite">
-          <span>版本檢查中</span>
-        </div>
-
-        <section id="dashboard" class="page active">
-          <div id="focusPanel" class="focus-panel"></div>
           <div class="hero-panel dashboard-hero">
             <div>
               <p class="eyebrow">快速記錄</p>
@@ -73,6 +63,7 @@
               <button class="ghost-button" data-goto="analysis">完整分析</button>
             </div>
           </div>
+          <div id="focusPanel" class="focus-panel"></div>
           <div id="latestCards" class="metric-grid"></div>
           <div class="two-column">
             <article class="panel">
@@ -111,6 +102,31 @@
               <button class="danger-button delete-tank-button" id="deleteTankBtn" type="button" title="刪除目前選取的魚缸">刪除魚缸</button>
             </div>
           </form>
+          <article class="panel form-panel">
+            <div class="panel-heading">
+              <h3>資料與備份</h3>
+              <span class="badge muted">管理</span>
+            </div>
+            <div class="notice compact">
+              備份會包含所有魚缸、水質紀錄、滴定設定與套用紀錄。還原前會再次確認，避免覆蓋目前資料。
+            </div>
+            <div class="backup-actions settings-backup-actions" aria-label="資料備份">
+              <button class="ghost-button" id="exportBtn" type="button" title="下載這台裝置目前的資料備份">下載備份</button>
+              <label class="ghost-button file-button" title="選擇備份檔，確認後覆蓋這台裝置資料">
+                從備份還原
+                <input id="importInput" type="file" accept="application/json" />
+              </label>
+            </div>
+          </article>
+          <article class="panel form-panel">
+            <div class="panel-heading">
+              <h3>關於</h3>
+              <span class="badge muted">版本</span>
+            </div>
+            <div id="versionPanel" class="version-panel settings-version-panel" aria-live="polite">
+              <span>版本檢查中</span>
+            </div>
+          </article>
         </section>
 
         <section id="water" class="page">
