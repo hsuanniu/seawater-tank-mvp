@@ -613,12 +613,6 @@ function dashboardTone(row) {
   return "stable";
 }
 
-function focusIcon(tone) {
-  if (tone === "danger") return "!";
-  if (tone === "attention") return "~";
-  return "✓";
-}
-
 function metricCardClass(row, focus) {
   const classes = ["metric-card"];
   if (row.key === focus.key) classes.push("is-focus");
@@ -659,7 +653,6 @@ function renderDashboard() {
           <h3>${focus.label}：${focus.status.text}${focus.trendText !== "無上次資料" ? `，較上次${focus.trendText}` : ""}</h3>
           <p>${focus.doseKey ? formatDoseSentence(focus, doseStatusText) : nutrientFocusText(focus)}</p>
         </div>
-        <div class="focus-icon" aria-hidden="true">${focusIcon(tone)}</div>
       </article>
     `;
     cards.innerHTML = analysis.rows
