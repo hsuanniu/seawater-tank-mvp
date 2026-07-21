@@ -1,5 +1,5 @@
 (function bootstrapModuleApp() {
-  const moduleSrc = "app.module.js?v=20260721-home-priority";
+  const moduleSrc = "app.module.js?v=20260721-home-header-cleanup";
   const alreadyLoaded = Array.from(document.scripts).some((script) => script.src.includes("app.module.js"));
   if (alreadyLoaded) return;
 

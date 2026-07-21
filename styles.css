@@ -164,6 +164,18 @@ button {
   padding: 28px;
 }
 
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .topbar {
   display: flex;
   justify-content: space-between;
@@ -929,6 +941,13 @@ body.sop-open {
 .dashboard-hero h3 {
   font-size: 24px;
   letter-spacing: 0;
+}
+
+.dashboard-hero #dashboardMeta {
+  margin-top: 8px;
+  color: var(--ink);
+  font-size: 17px;
+  font-weight: 850;
 }
 
 .panel {

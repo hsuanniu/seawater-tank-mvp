@@ -630,12 +630,10 @@ function metricCardClass(row, focus) {
 
 function renderDashboard() {
   const analysis = analyze();
-  const tank = tankSettings();
-  document.querySelector("#tankNameDisplay").textContent = tank.name;
   const salinityText = analysis?.latest?.salinity ? ` | 比重 ${formatNumber(analysis.latest.salinity, 3)}` : "";
   document.querySelector("#dashboardMeta").textContent = analysis
-    ? `${tank.volume} L${salinityText} | 最新紀錄 ${analysis.latest.date}${analysis.daysSincePrevious !== null ? ` | 距上次 ${analysis.daysSincePrevious} 天` : ""}`
-    : `${tank.volume} L | 尚未建立紀錄`;
+    ? `最新紀錄：${analysis.latest.date}${analysis.daysSincePrevious !== null ? ` | 距上次 ${analysis.daysSincePrevious} 天` : ""}${salinityText}`
+    : "尚未建立紀錄";
 
   const cards = document.querySelector("#latestCards");
   const focusPanel = document.querySelector("#focusPanel");

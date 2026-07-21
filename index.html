@@ -7,7 +7,7 @@
     <meta name="theme-color" content="#e9f8fb" />
     <link rel="manifest" href="manifest.webmanifest" />
     <link rel="apple-touch-icon" href="icons/icon-192.svg" />
-    <link rel="stylesheet" href="styles.css?v=20260721-home-priority" />
+    <link rel="stylesheet" href="styles.css?v=20260721-home-header-cleanup" />
   </head>
   <body>
     <div class="app-shell">
@@ -33,12 +33,7 @@
       </aside>
 
       <main class="content">
-        <header class="topbar">
-          <div>
-            <p class="eyebrow">MVP 單機版</p>
-            <h2 id="pageTitle">首頁</h2>
-          </div>
-        </header>
+        <h2 id="pageTitle" class="visually-hidden">首頁</h2>
         <div id="appFeedback" class="app-feedback" role="status" aria-live="polite"></div>
 
         <section id="dashboard" class="page active">
@@ -55,7 +50,6 @@
           <div class="hero-panel dashboard-hero">
             <div>
               <p class="eyebrow">快速記錄</p>
-              <h3 id="tankNameDisplay">我的海水缸</h3>
               <p id="dashboardMeta">尚未建立紀錄</p>
             </div>
             <div class="hero-actions">
