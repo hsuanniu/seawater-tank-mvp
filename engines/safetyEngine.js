@@ -81,6 +81,13 @@ function boundedDoseChange(
   return Number((direction * conservativeLimit).toFixed(1));
 }
 
+function khLowMinimumIncrease({ parameter, currentValue, direction, recoveryContext = {} }) {
+  if (parameter !== "kh" || direction <= 0 || recoveryContext.event_recovery_mode) return 0;
+  if (currentValue <= 7.5) return 0.3;
+  if (currentValue < 7.8) return 0.2;
+  return 0;
+}
+
 export function classifyTrendSpeed(parameter, dailyDelta) {
   if (dailyDelta === null || dailyDelta === undefined) return { tooFast: false, text: "尚無足夠資料" };
   const threshold = FAST_CHANGE_THRESHOLDS[parameter] || Infinity;
@@ -582,7 +589,7 @@ export function calculateDosingRecommendation({
     };
   }
 
-  const doseChangeMlPerDay = boundedDoseChange(
+  const boundedChangeMlPerDay = boundedDoseChange(
     parameter,
     currentDoseMlPerDay,
     direction,
@@ -592,6 +599,15 @@ export function calculateDosingRecommendation({
     observeContext,
     khInRangeTrendMicroAdjust ? "KH_IN_RANGE_TREND_MICRO_ADJUST" : "",
   );
+  const minimumKhIncreaseMlPerDay = khLowMinimumIncrease({
+    parameter,
+    currentValue,
+    direction,
+    recoveryContext,
+  });
+  const doseChangeMlPerDay = minimumKhIncreaseMlPerDay > 0
+    ? Number(Math.max(boundedChangeMlPerDay, minimumKhIncreaseMlPerDay).toFixed(1))
+    : boundedChangeMlPerDay;
   if (doseChangeMlPerDay === 0) {
     return observeOnlyResult({
       currentDoseMlPerDay,
@@ -610,6 +626,8 @@ export function calculateDosingRecommendation({
   let finalReasonText = reasonText;
   if (recoveryContext.event_recovery_mode) {
     finalReasonText = `${reasonText} 目前處於設備恢復期，先建立 temporary baseline，至少觀察 2-3 次正常測量後再恢復完整演算法。`;
+  } else if (minimumKhIncreaseMlPerDay > boundedChangeMlPerDay) {
+    finalReasonText = `${reasonText} KH 已低於 7.8，套用最低調整幅度，避免保守係數讓建議低於滴定機實務解析度。`;
   }
   return {
     suggestedDoseMlPerDay,

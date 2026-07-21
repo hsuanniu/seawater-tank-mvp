@@ -742,38 +742,102 @@ body.sop-open {
   color: var(--red);
 }
 
-.delete-tank-button {
-  white-space: nowrap;
-}
-
 .file-button input {
   display: none;
 }
 
-.tank-picker {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 40px;
-  padding: 7px 10px;
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.9);
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 850;
+.tank-switcher {
+  position: relative;
+  min-width: 190px;
 }
 
-.tank-picker select {
-  width: auto;
-  min-width: 150px;
-  border: 0;
-  padding: 2px 22px 2px 4px;
-  background: transparent;
+.tank-switcher-button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  min-height: 42px;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.92);
   color: var(--ink);
   font-size: 14px;
+  font-weight: 850;
+  box-shadow: 0 12px 28px rgba(25, 69, 84, 0.08);
+}
+
+.tank-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  z-index: 20;
+  width: min(320px, calc(100vw - 28px));
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 20px 50px rgba(25, 69, 84, 0.18);
+}
+
+.tank-menu-list,
+.tank-menu-actions,
+.tank-form-actions {
+  display: grid;
+  gap: 8px;
+}
+
+.tank-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--ink);
   font-weight: 800;
-  box-shadow: none;
+  text-align: left;
+}
+
+.tank-menu-item span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.tank-menu-item.active {
+  border-color: #b9dce3;
+  background: #f1f9fa;
+}
+
+.tank-menu-item strong {
+  flex: 0 0 auto;
+  color: var(--teal-dark);
+  font-size: 12px;
+}
+
+.tank-menu-actions {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.delete-tank-button {
+  white-space: nowrap;
+}
+
+.no-tanks .sidebar .nav,
+.no-tanks .mobile-nav,
+.no-tanks .tank-switcher {
+  display: none;
+}
+
+.no-tanks .content {
+  max-width: 820px;
 }
 
 .page {
@@ -1942,16 +2006,22 @@ th {
     gap: 8px;
   }
 
-  .tank-picker {
+  .tank-switcher {
     min-width: 0;
   }
 
-  .tank-picker select {
-    min-width: 0;
-    max-width: 100%;
+  .tank-menu {
+    position: fixed;
+    left: 10px;
+    right: 10px;
+    bottom: 76px;
+    top: auto;
+    width: auto;
+    max-height: min(70vh, 520px);
+    overflow-y: auto;
+    border-radius: 20px;
   }
 
-  #addTankBtn,
   #deleteTankBtn {
     width: 100%;
     min-width: 0;
@@ -2013,7 +2083,7 @@ th {
   .hero-actions button,
   .button-row button,
   .focus-card button,
-  .topbar-actions > *:not(#addTankBtn) {
+  .topbar-actions > * {
     width: 100%;
   }
 

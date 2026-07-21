@@ -36,7 +36,10 @@ function useStorage(storage = new MemoryStorage()) {
 }
 
 function createStore(storageKey = "stability-suite", options = {}) {
-  return createTankStore({ storageKey, ...options });
+  const { seedTank = true, ...storeOptions } = options;
+  const store = createTankStore({ storageKey, ...storeOptions });
+  if (seedTank && store.getState().tanks.length === 0) store.addTank(DEFAULT_TANK.name);
+  return store;
 }
 
 function completeMeasurement(overrides = {}) {
@@ -242,6 +245,35 @@ test("KH low but already rising observes instead of increasing aggressively", ()
   assert.equal(result.reasonCode, "KH_LOW_BUT_RISING_OBSERVE");
   assert.equal(result.canApply, false);
   assert.equal(result.doseChangeMlPerDay, 0);
+});
+
+test("KH low minimum adjustment avoids sub-practical increases", () => {
+  const kh77 = calculateDosingRecommendation(dosingInput("kh", {
+    currentValue: 7.7,
+    previousValue: 7.9,
+    targetRange: { min: 8, max: 9 },
+    currentDoseMlPerDay: 10.8,
+    tankVolumeLiters: 65,
+    statusCode: classify(7.7, { min: 8, max: 9 }, "kh").code,
+    trendText: "下降",
+  }));
+  const kh75 = calculateDosingRecommendation(dosingInput("kh", {
+    currentValue: 7.5,
+    previousValue: 7.8,
+    targetRange: { min: 8, max: 9 },
+    currentDoseMlPerDay: 10.8,
+    tankVolumeLiters: 65,
+    statusCode: classify(7.5, { min: 8, max: 9 }, "kh").code,
+    trendText: "下降",
+  }));
+
+  assert.equal(kh77.reasonCode, "LOW_SMALL_INCREASE");
+  assert.equal(kh77.doseChangeMlPerDay, 0.2);
+  assert.equal(kh77.suggestedDoseMlPerDay, 11);
+  assert.match(kh77.reasonText, /最低調整幅度/);
+  assert.equal(kh75.reasonCode, "LOW_SMALL_INCREASE");
+  assert.equal(kh75.doseChangeMlPerDay, 0.3);
+  assert.equal(kh75.suggestedDoseMlPerDay, 11.1);
 });
 
 test("MG recovery mode limits changes to one percent and stays below high confidence", () => {
@@ -498,7 +530,7 @@ test("CA high readings avoid automatic dose changes and escalate by trend", () =
   assert.equal(confirmedHigh.autoCalculationPaused, true);
 });
 
-test("Nano tanks and recent disruptive events reduce dosing adjustments", () => {
+test("KH low minimum floor applies after nano and recent-event conservatism", () => {
   const records = [
     completeMeasurement({ id: "kh-before", date: "2026-06-01", kh: 7.8 }),
     completeMeasurement({ id: "kh-current", date: "2026-06-08", kh: 7.3 }),
@@ -525,9 +557,9 @@ test("Nano tanks and recent disruptive events reduce dosing adjustments", () => 
   }).rows.find((row) => row.key === "kh");
 
   assert.equal(largeTank.doseChange, 0.3);
-  assert.equal(nanoTank.doseChange, 0.1);
+  assert.equal(nanoTank.doseChange, 0.3);
   assert.equal(recentLargeWaterChange.observe_mode, true);
-  assert.equal(recentLargeWaterChange.doseChange, 0.1);
+  assert.equal(recentLargeWaterChange.doseChange, 0.3);
 });
 
 test("Tank Store records recovery events without breaking existing tank data", () => {
@@ -545,6 +577,24 @@ test("Tank Store records recovery events without breaking existing tank data", (
   assert.equal(event.affected_element, "CA");
   assert.equal(event.recovery_days, 14);
   assert.equal(store.serializeState().tanks[0].records.length, 0);
+});
+
+test("Tank Store starts empty and persists the last selected tank", () => {
+  useStorage();
+  const store = createStore("empty-first-run", { seedTank: false });
+
+  assert.equal(store.getState().tanks.length, 0);
+  assert.equal(store.getState().activeTankId, null);
+
+  const first = store.addTank("Nano 海水缸");
+  const second = store.addTank("SPS 主缸");
+  store.setActiveTank(first.id);
+
+  const reloaded = createTankStore({ storageKey: "empty-first-run" });
+  assert.equal(reloaded.getState().tanks.length, 2);
+  assert.equal(reloaded.getState().activeTankId, first.id);
+  assert.equal(reloaded.getActiveTank().tank.name, "Nano 海水缸");
+  assert.equal(second.tank.name, "SPS 主缸");
 });
 
 test("Measurement Store updates same-date records instead of creating duplicates", () => {

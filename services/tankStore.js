@@ -14,8 +14,8 @@ export function createTankStore({ storageKey, onChange = () => {}, onDosingDebug
 
   function mergeState(stored) {
     if (Array.isArray(stored.tanks)) {
-      const tanks = stored.tanks.length ? stored.tanks.map((tank) => mergeTankData(tank)) : [createTankData()];
-      const activeTankId = tanks.some((tank) => tank.id === stored.activeTankId) ? stored.activeTankId : tanks[0].id;
+      const tanks = stored.tanks.map((tank) => mergeTankData(tank));
+      const activeTankId = tanks.some((tank) => tank.id === stored.activeTankId) ? stored.activeTankId : tanks[0]?.id || null;
       return { version: 3, activeTankId, tanks };
     }
 
@@ -30,8 +30,7 @@ export function createTankStore({ storageKey, onChange = () => {}, onDosingDebug
   }
 
   function createInitialState() {
-    const firstTank = createTankData();
-    return { version: 3, activeTankId: firstTank.id, tanks: [firstTank] };
+    return { version: 3, activeTankId: null, tanks: [] };
   }
 
   function createTankData(overrides = {}) {
@@ -116,6 +115,10 @@ export function createTankStore({ storageKey, onChange = () => {}, onDosingDebug
 
   function getActiveTank() {
     const active = state.tanks.find((tank) => tank.id === state.activeTankId) || state.tanks[0];
+    if (!active) {
+      state.activeTankId = null;
+      return null;
+    }
     state.activeTankId = active.id;
     return active;
   }
@@ -139,19 +142,19 @@ export function createTankStore({ storageKey, onChange = () => {}, onDosingDebug
     mergeState,
     createTankData,
     getActiveTank,
-    getTank: () => getActiveTank().tank,
-    getTargets: () => getActiveTank().tank.targets,
-    getDosing: () => getActiveTank().dosing,
-    getMeasurements: () => getActiveTank().records,
-    getArchivedMeasurements: () => getActiveTank().archivedRecords || [],
-    getMaintenance: () => getActiveTank().maintenance,
-    getDoseApplications: () => getActiveTank().doseApplications,
-    getLivestock: () => getActiveTank().livestock,
-    getEvents: () => getActiveTank().events,
-    getAdditives: () => getActiveTank().additives,
-    getAdditiveSchedules: () => getActiveTank().additiveSchedules,
-    getFeedings: () => getActiveTank().feedings,
-    getUiState: () => getActiveTank().uiState,
+    getTank: () => getActiveTank()?.tank || clone(DEFAULT_TANK),
+    getTargets: () => getActiveTank()?.tank.targets || clone(DEFAULT_TANK.targets),
+    getDosing: () => getActiveTank()?.dosing || clone(DEFAULT_DOSING),
+    getMeasurements: () => getActiveTank()?.records || [],
+    getArchivedMeasurements: () => getActiveTank()?.archivedRecords || [],
+    getMaintenance: () => getActiveTank()?.maintenance || [],
+    getDoseApplications: () => getActiveTank()?.doseApplications || [],
+    getLivestock: () => getActiveTank()?.livestock || [],
+    getEvents: () => getActiveTank()?.events || [],
+    getAdditives: () => getActiveTank()?.additives || [],
+    getAdditiveSchedules: () => getActiveTank()?.additiveSchedules || [],
+    getFeedings: () => getActiveTank()?.feedings || [],
+    getUiState: () => getActiveTank()?.uiState || {},
     persist,
     notify,
     setActiveTank(tankId) {
@@ -160,8 +163,22 @@ export function createTankStore({ storageKey, onChange = () => {}, onDosingDebug
       persist();
       notify({ forms: true });
     },
-    addTank(name) {
-      const newTank = createTankData({ name });
+    addTank(name, settings = {}) {
+      const newTank = createTankData({
+        tank: {
+          ...clone(DEFAULT_TANK),
+          ...settings,
+          name: name || settings.name || DEFAULT_TANK.name,
+          targets: {
+            ...clone(DEFAULT_TANK.targets),
+            ...(settings.targets || {}),
+          },
+          targetInputs: {
+            ...clone(DEFAULT_TANK.targetInputs),
+            ...(settings.targetInputs || {}),
+          },
+        },
+      });
       state.tanks.push(newTank);
       state.activeTankId = newTank.id;
       persist();
@@ -179,13 +196,15 @@ export function createTankStore({ storageKey, onChange = () => {}, onDosingDebug
       return { deleted: true, deletedTank, activeTank: getActiveTank() };
     },
     updateTankSettings({ name, volume, targets, targetInputs }) {
-      const tank = getActiveTank().tank;
+      const tank = getActiveTank()?.tank;
+      if (!tank) return null;
       tank.name = name || DEFAULT_TANK.name;
       tank.volume = volume;
       tank.targets = { ...tank.targets, ...targets };
       tank.targetInputs = { ...tank.targetInputs, ...targetInputs };
       persist();
       notify({ forms: true });
+      return tank;
     },
     addMeasurement(record) {
       const tankData = getActiveTank();

@@ -30,6 +30,7 @@ let dosingAutoSaveTimer = null;
 let feedbackTimer = null;
 let historyMode = "active";
 let measurementMethodDraft = {};
+let tankFormMode = "edit";
 
 const TankStore = createTankStore({
   storageKey: STORAGE_KEY,
@@ -73,6 +74,10 @@ const MeasurementSop = createMeasurementSopController({
 
 function activeTank() {
   return TankStore.getActiveTank();
+}
+
+function hasTanks() {
+  return TankStore.getState().tanks.length > 0;
 }
 
 function tankSettings() {
@@ -380,9 +385,9 @@ function buildMeasurementFromForm(data) {
   });
 }
 
-function renderTargetInputs() {
+function renderTargetInputs(tankOverride = null) {
   const container = document.querySelector("#targetInputs");
-  const tank = tankSettings();
+  const tank = tankOverride || tankSettings();
   container.innerHTML = PARAMETERS
     .map((param) => {
       const target = tank.targets[param.key];
@@ -528,13 +533,23 @@ function dosingReadoutHtml() {
 }
 
 function renderForms() {
-  const tank = tankSettings();
-  const dosing = dosingSettings();
+  const creatingTank = tankFormMode === "create" || !hasTanks();
+  const tank = creatingTank ? cloneData(DEFAULT_TANK) : tankSettings();
   const tankForm = document.querySelector("#tankForm");
   tankForm.name.value = tank.name;
   tankForm.volume.value = tank.volume;
-  renderTargetInputs();
+  document.querySelector("#tankFormTitle").textContent = !hasTanks()
+    ? "建立第一個魚缸"
+    : creatingTank
+      ? "新增魚缸"
+      : "魚缸基本設定";
+  document.querySelector("#tankFormBadge").textContent = creatingTank ? "首次設定" : "可自訂目標";
+  document.querySelector("#tankFormSubmit").textContent = creatingTank ? "建立魚缸" : "儲存魚缸設定";
+  document.querySelector("#deleteTankBtn").hidden = creatingTank;
+  renderTargetInputs(tank);
+  if (!hasTanks()) return;
 
+  const dosing = dosingSettings();
   const dosingForm = document.querySelector("#dosingForm");
   Object.entries(dosing).forEach(([key, value]) => {
     if (key !== "status" && dosingForm.elements[key]) dosingForm.elements[key].value = value;
@@ -555,12 +570,32 @@ function renderForms() {
 }
 
 function renderTankSwitcher() {
-  const select = document.querySelector("#tankSelect");
+  const switcher = document.querySelector("#tankSwitcher");
+  const menuButton = document.querySelector("#tankMenuButton");
+  const menuLabel = document.querySelector("#tankMenuLabel");
+  const menu = document.querySelector("#tankMenu");
   const deleteButton = document.querySelector("#deleteTankBtn");
   const storeState = TankStore.getState();
-  select.innerHTML = storeState.tanks
-    .map((tank) => `<option value="${escapeHtml(tank.id)}" ${tank.id === storeState.activeTankId ? "selected" : ""}>${escapeHtml(tank.tank.name)}</option>`)
-    .join("");
+  const active = storeState.tanks.find((tank) => tank.id === storeState.activeTankId) || storeState.tanks[0] || null;
+  if (switcher) switcher.hidden = storeState.tanks.length === 0;
+  if (menuLabel) menuLabel.textContent = active?.tank.name || "選擇魚缸";
+  if (menuButton) menuButton.setAttribute("aria-expanded", menu && !menu.hidden ? "true" : "false");
+  if (menu) {
+    menu.innerHTML = `
+      <div class="tank-menu-list">
+        ${storeState.tanks.map((tank) => `
+          <button class="tank-menu-item ${tank.id === storeState.activeTankId ? "active" : ""}" type="button" data-select-tank="${escapeHtml(tank.id)}">
+            <span>${escapeHtml(tank.tank.name)}</span>
+            ${tank.id === storeState.activeTankId ? "<strong>目前</strong>" : ""}
+          </button>
+        `).join("")}
+      </div>
+      <div class="tank-menu-actions">
+        <button class="ghost-button" type="button" data-add-tank>＋新增魚缸</button>
+        <button class="ghost-button" type="button" data-manage-tanks>管理魚缸</button>
+      </div>
+    `;
+  }
   if (deleteButton) {
     deleteButton.disabled = storeState.tanks.length <= 1;
     deleteButton.title = storeState.tanks.length <= 1
@@ -1183,8 +1218,16 @@ function renderChart() {
 }
 
 function renderAll({ forms = true, cloud = true } = {}) {
-  activeTank();
   renderTankSwitcher();
+  document.body.classList.toggle("no-tanks", !hasTanks());
+  if (!hasTanks()) {
+    tankFormMode = "create";
+    if (forms) renderForms();
+    switchPage("tank");
+    if (cloud) renderCloudUi();
+    return;
+  }
+  activeTank();
   if (forms) renderForms();
   renderDashboard();
   renderAnalysis();
@@ -1226,11 +1269,16 @@ function showSavedFeedback(button, message = "已儲存") {
 }
 
 function switchPage(id) {
+  if (!hasTanks() && id !== "tank") id = "tank";
+  if (id === "tank" && hasTanks() && tankFormMode !== "create") tankFormMode = "edit";
   document.querySelectorAll(".page").forEach((page) => page.classList.toggle("active", page.id === id));
   document.querySelectorAll(".nav-link").forEach((link) => link.classList.toggle("active", link.dataset.section === id));
-  document.querySelector("#pageTitle").textContent = document.querySelector(`.nav-link[data-section="${id}"]`)?.textContent || "首頁";
+  document.querySelector("#pageTitle").textContent = !hasTanks()
+    ? "建立第一個魚缸"
+    : document.querySelector(`.nav-link[data-section="${id}"]`)?.textContent || "首頁";
   if (id === "analysis") renderAnalysis();
   if (id === "dosing") renderDosingSavedMeta();
+  if (id === "tank") renderForms();
 }
 
 function formData(form) {
@@ -1503,6 +1551,40 @@ function setupEvents() {
   });
 
   document.addEventListener("click", (event) => {
+    const menuButton = event.target.closest("#tankMenuButton");
+    const tankMenu = document.querySelector("#tankMenu");
+    if (menuButton && tankMenu) {
+      tankMenu.hidden = !tankMenu.hidden;
+      menuButton.setAttribute("aria-expanded", tankMenu.hidden ? "false" : "true");
+      return;
+    }
+    const selectTank = event.target.closest("[data-select-tank]");
+    if (selectTank) {
+      TankStore.setActiveTank(selectTank.dataset.selectTank);
+      if (tankMenu) tankMenu.hidden = true;
+      tankFormMode = "edit";
+      switchPage("dashboard");
+      showToast(`已切換到 ${tankSettings().name}`);
+      return;
+    }
+    const addTank = event.target.closest("[data-add-tank]");
+    if (addTank) {
+      if (tankMenu) tankMenu.hidden = true;
+      tankFormMode = "create";
+      switchPage("tank");
+      return;
+    }
+    const manageTanks = event.target.closest("[data-manage-tanks]");
+    if (manageTanks) {
+      if (tankMenu) tankMenu.hidden = true;
+      tankFormMode = "edit";
+      switchPage("tank");
+      return;
+    }
+    if (tankMenu && !tankMenu.hidden && !event.target.closest("#tankSwitcher")) {
+      tankMenu.hidden = true;
+      document.querySelector("#tankMenuButton")?.setAttribute("aria-expanded", "false");
+    }
     const target = event.target.closest("[data-goto]");
     if (target) switchPage(target.dataset.goto);
     const sopTarget = event.target.closest("[data-open-sop]");
@@ -1557,19 +1639,8 @@ function setupEvents() {
     }
   });
 
-  document.querySelector("#tankSelect").addEventListener("change", (event) => {
-    TankStore.setActiveTank(event.target.value);
-    showToast(`已切換到 ${tankSettings().name}`);
-  });
-
   document.querySelector("#startMeasurementSopBtn").addEventListener("click", () => {
     MeasurementSop.open("kh", { sequence: true });
-  });
-
-  document.querySelector("#addTankBtn").addEventListener("click", () => {
-    TankStore.addTank(`魚缸 ${TankStore.getState().tanks.length + 1}`);
-    switchPage("tank");
-    showToast("新魚缸已建立");
   });
 
   document.querySelector("#deleteTankBtn").addEventListener("click", () => {
@@ -1638,6 +1709,19 @@ function setupEvents() {
       targets[param.key] = parsedTargets[param.key].target;
       targetInputs[param.key] = parsedTargets[param.key].raw;
     });
+    if (tankFormMode === "create" || !hasTanks()) {
+      const newTank = TankStore.addTank(data.name.trim() || DEFAULT_TANK.name, {
+        volume: toNumber(data.volume, DEFAULT_TANK.volume),
+        targets,
+        targetInputs,
+      });
+      tankFormMode = "edit";
+      renderAll({ forms: true, cloud: false });
+      switchPage("dashboard");
+      showSavedFeedback(event.submitter, "已建立");
+      showToast(`已建立並切換到 ${newTank.tank.name}`);
+      return;
+    }
     TankStore.updateTankSettings({
       name: data.name.trim() || DEFAULT_TANK.name,
       volume: toNumber(data.volume, DEFAULT_TANK.volume),

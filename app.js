@@ -1,5 +1,5 @@
 (function bootstrapModuleApp() {
-  const moduleSrc = "app.module.js?v=20260708-ocean-light-ui";
+  const moduleSrc = "app.module.js?v=20260721-tank-switcher-flow";
   const alreadyLoaded = Array.from(document.scripts).some((script) => script.src.includes("app.module.js"));
   if (alreadyLoaded) return;
 

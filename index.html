@@ -7,7 +7,7 @@
     <meta name="theme-color" content="#e9f8fb" />
     <link rel="manifest" href="manifest.webmanifest" />
     <link rel="apple-touch-icon" href="icons/icon-192.svg" />
-    <link rel="stylesheet" href="styles.css?v=20260708-ocean-light-ui" />
+    <link rel="stylesheet" href="styles.css?v=20260721-tank-switcher-flow" />
   </head>
   <body>
     <div class="app-shell">
@@ -39,12 +39,13 @@
             <h2 id="pageTitle">首頁</h2>
           </div>
           <div class="topbar-actions">
-            <label class="tank-picker">
-              魚缸
-              <select id="tankSelect" aria-label="切換魚缸"></select>
-            </label>
-            <button class="ghost-button" id="addTankBtn">新增魚缸</button>
-            <button class="danger-button delete-tank-button" id="deleteTankBtn" title="刪除目前選取的魚缸">刪除魚缸</button>
+            <div class="tank-switcher" id="tankSwitcher">
+              <button class="tank-switcher-button" id="tankMenuButton" type="button" aria-haspopup="dialog" aria-expanded="false">
+                <span id="tankMenuLabel">選擇魚缸</span>
+                <span aria-hidden="true">▼</span>
+              </button>
+              <div class="tank-menu" id="tankMenu" hidden></div>
+            </div>
             <div class="backup-actions" aria-label="資料備份">
               <button class="ghost-button" id="exportBtn" title="下載這台裝置目前的資料備份">下載備份</button>
               <label class="ghost-button file-button" title="選擇備份檔，確認後覆蓋這台裝置資料">
@@ -94,8 +95,8 @@
         <section id="tank" class="page">
           <form id="tankForm" class="panel form-panel">
             <div class="panel-heading">
-              <h3>魚缸基本設定</h3>
-              <span class="badge">可自訂目標</span>
+              <h3 id="tankFormTitle">魚缸基本設定</h3>
+              <span class="badge" id="tankFormBadge">可自訂目標</span>
             </div>
             <div class="form-grid">
               <label>魚缸名稱<input name="name" required /></label>
@@ -105,7 +106,10 @@
               目標可輸入範圍或中心值，例如 8-9、0.25~2、400+/-20、1350 +/-30、400。單一數值會依項目預設容忍值自動展開。
             </div>
             <div class="target-grid" id="targetInputs"></div>
-            <button class="primary-button" type="submit">儲存魚缸設定</button>
+            <div class="button-row tank-form-actions">
+              <button class="primary-button" id="tankFormSubmit" type="submit">儲存魚缸設定</button>
+              <button class="danger-button delete-tank-button" id="deleteTankBtn" type="button" title="刪除目前選取的魚缸">刪除魚缸</button>
+            </div>
           </form>
         </section>
 
