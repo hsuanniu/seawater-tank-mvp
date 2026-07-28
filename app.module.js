@@ -248,6 +248,16 @@ function reasonText(reasonCode) {
     DOSER_DISABLED: "滴定目前關閉",
     DOSING_PAUSED_THIS_WEEK: "本週曾暫停滴定",
     WITHIN_TARGET: "位於目標範圍",
+    KH_IN_TARGET_MAINTAIN: "KH 位於目標範圍",
+    KH_LOW_STABLE_OBSERVE: "KH 略低但穩定",
+    KH_CONSECUTIVE_LOW_SMALL_INCREASE: "KH 連續偏低",
+    KH_SIGNIFICANT_DROP_SMALL_INCREASE: "KH 明顯下降",
+    KH_OBSERVATION_PERIOD_ACTIVE: "KH 調整後觀察期",
+    KH_PRIORITY_LOW_OBSERVATION_PERIOD: "KH 優先處理觀察期",
+    KH_DOSE_HISTORY_INSUFFICIENT: "KH 調整紀錄不足",
+    KH_PRIORITY_LOW_HISTORY_INSUFFICIENT: "KH 優先處理",
+    KH_PRIORITY_LOW_SMALL_INCREASE: "KH 優先處理",
+    KH_LOW_UNSTABLE_VERIFY_FIRST: "KH 波動待確認",
     HIGH_REDUCE_ONLY: "高於目標，只允許保守降低",
     LOW_SMALL_INCREASE: "低於目標，只允許小幅增加",
     KH_IN_RANGE_TREND_MICRO_ADJUST: "目標內趨勢微調",
@@ -292,6 +302,7 @@ function analyze() {
     events: systemEvents(),
     maintenance: maintenanceRecords(),
     livestock: livestock(),
+    doseApplications: TankStore.getDoseApplications(),
   });
 }
 
@@ -359,6 +370,7 @@ function buildMeasurementSnapshot(record) {
     events: systemEvents(),
     maintenance: maintenanceRecords(),
     livestock: livestock(),
+    doseApplications: TankStore.getDoseApplications(),
   });
   return {
     createdAt: new Date().toISOString(),
@@ -683,6 +695,12 @@ function recommendationCard(row) {
   const canApply = row.canApplyRecommendation && APPLICABLE_DOSE_KEYS.includes(row.key);
   const needsBaseline = row.reasonCode === "ZERO_CURRENT_DOSE";
   const autoPaused = row.autoCalculationPaused;
+  const observationLine = row.observationDaysRemaining > 0
+    ? `<p><strong>觀察期：</strong>目前仍在觀察期，距離可再次判斷還有 ${formatNumber(row.observationDaysRemaining, 0)} 天；觀察期內不得再次增加。</p>`
+    : "";
+  const nextConditionLine = row.nextAdjustmentCondition
+    ? `<p><strong>下次觸發條件：</strong>${row.nextAdjustmentCondition}</p>`
+    : "";
   const doseCompare = needsBaseline
     ? `<div class="baseline-empty">
         <strong>請先建立滴定基準</strong>
@@ -715,6 +733,8 @@ function recommendationCard(row) {
       <p><strong>問題：</strong>${recommendationProblem(row)}</p>
       <p><strong>原因：</strong>${reasonText(row.reasonCode)}。${row.recommendationReason}</p>
       <p><strong>建議動作：</strong>${recommendationAction(row)}</p>
+      ${nextConditionLine}
+      ${observationLine}
       <p class="muted-line">${dailyDeltaText(row)}</p>
       <strong>安全提醒</strong>
       <ul class="warning-list">${warnings}</ul>

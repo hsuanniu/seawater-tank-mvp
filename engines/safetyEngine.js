@@ -25,6 +25,17 @@ export const DOSING_LIMITS = {
   mg: { maxMlChange: 0.5, normalMaxMlChange: 0.2, percent: 0.05, normalPercent: 0.03 },
 };
 
+export const KH_DOSING_STABILITY_RULES = {
+  targetMin: 8.0,
+  targetMax: 9.0,
+  stableTolerance: 0.2,
+  significantDropThreshold: 0.3,
+  mildIncrease: 0.3,
+  minimumLowCountForAdjustment: 3,
+  minimumObservationDaysAfterAdjustment: 7,
+  priorityLowThreshold: 7.5,
+};
+
 export const RECOVERY_DOSING_LIMITS = {
   kh: { percent: 0.03 },
   ca: { percent: 0.02 },
@@ -79,13 +90,6 @@ function boundedDoseChange(
   const observeFactor = observeContext.observe_mode ? observeContext.adjustment_factor || 0.5 : 1;
   const conservativeLimit = Math.floor(baseLimit * nanoFactor * observeFactor * 10) / 10;
   return Number((direction * conservativeLimit).toFixed(1));
-}
-
-function khLowMinimumIncrease({ parameter, currentValue, direction, recoveryContext = {} }) {
-  if (parameter !== "kh" || direction <= 0 || recoveryContext.event_recovery_mode) return 0;
-  if (currentValue <= 7.5) return 0.3;
-  if (currentValue < 7.8) return 0.2;
-  return 0;
 }
 
 export function classifyTrendSpeed(parameter, dailyDelta) {
@@ -183,6 +187,196 @@ function observeOnlyResult({
   };
 }
 
+function roundedDose(value) {
+  return Number(Number(value).toFixed(1));
+}
+
+function khNextAdjustmentCondition({ currentValue, targetRange, consecutiveLowCount, daysSinceLastDoseAdjustment }) {
+  const rules = KH_DOSING_STABILITY_RULES;
+  if (currentValue >= targetRange.min) return "KH 若再次連續低於目標下限，才重新累積偏低趨勢。";
+  if (!Number.isFinite(daysSinceLastDoseAdjustment)) {
+    return `需要確認目前滴定量或上次調整後已維持至少 ${rules.minimumObservationDaysAfterAdjustment} 天，且 KH 連續第 ${rules.minimumLowCountForAdjustment} 次低於 ${targetRange.min}。`;
+  }
+  if (daysSinceLastDoseAdjustment < rules.minimumObservationDaysAfterAdjustment) {
+    const remaining = rules.minimumObservationDaysAfterAdjustment - daysSinceLastDoseAdjustment;
+    return `目前仍在調整後觀察期，距離可再次判斷還有 ${remaining} 天；觀察期內不得再次增加。`;
+  }
+  if (consecutiveLowCount < rules.minimumLowCountForAdjustment) {
+    return `若下次量測仍低於 ${targetRange.min}，且目前滴定量已維持至少 ${rules.minimumObservationDaysAfterAdjustment} 天，再考慮小幅增加 ${rules.mildIncrease} ml。`;
+  }
+  return `KH 連續第 ${rules.minimumLowCountForAdjustment} 次低於 ${targetRange.min}，且目前滴定量或上次調整後已維持至少 ${rules.minimumObservationDaysAfterAdjustment} 天。`;
+}
+
+export function evaluateKhDosingStability({
+  currentValue,
+  previousValue,
+  targetRange,
+  currentDoseMlPerDay,
+  consecutiveLowCount = 0,
+  daysSinceLastDoseAdjustment = null,
+  hasRecentDoseAdjustment = false,
+  safetyWarnings = [],
+  confidenceLevel = "HIGH",
+  dailyDelta = null,
+  speed = { tooFast: false, text: "尚無足夠資料" },
+  recoveryContext = {},
+  observeContext = {},
+} = {}) {
+  const rules = KH_DOSING_STABILITY_RULES;
+  const lowCount = currentValue < targetRange.min ? Math.max(1, Number(consecutiveLowCount) || 1) : 0;
+  const deltaFromPrevious = Number.isFinite(previousValue) ? currentValue - previousValue : null;
+  const isStable = deltaFromPrevious !== null && Math.abs(deltaFromPrevious) <= rules.stableTolerance;
+  const significantDrop = deltaFromPrevious !== null && previousValue - currentValue > rules.significantDropThreshold;
+  const priorityLow = currentValue < rules.priorityLowThreshold;
+  const hasObservationAge = Number.isFinite(daysSinceLastDoseAdjustment);
+  const inObservationPeriod = hasObservationAge && daysSinceLastDoseAdjustment < rules.minimumObservationDaysAfterAdjustment;
+  const doseHistoryInsufficient = !hasObservationAge && (hasRecentDoseAdjustment || lowCount >= rules.minimumLowCountForAdjustment || significantDrop || priorityLow);
+  const base = {
+    safetyWarnings,
+    confidenceLevel,
+    confidence_score: confidenceScore(confidenceLevel),
+    dailyDelta,
+    trendTooFast: speed.tooFast,
+    trendSpeedText: speed.text,
+    event_recovery_mode: Boolean(recoveryContext.event_recovery_mode),
+    observe_mode: Boolean(observeContext.observe_mode),
+    affected_element: recoveryContext.affected_element || null,
+    warning_message: recoveryContext.event_recovery_mode ? recoveryWarning("kh") : "",
+    khConsecutiveLowCount: lowCount,
+    daysSinceLastDoseAdjustment: hasObservationAge ? daysSinceLastDoseAdjustment : null,
+    observationDaysRemaining: inObservationPeriod ? rules.minimumObservationDaysAfterAdjustment - daysSinceLastDoseAdjustment : 0,
+  };
+
+  const observeResult = ({ reasonCode, reasonText, action = "OBSERVE", extraWarnings = [] }) => {
+    const nextAdjustmentCondition = khNextAdjustmentCondition({
+      currentValue,
+      targetRange,
+      consecutiveLowCount: lowCount,
+      daysSinceLastDoseAdjustment,
+    });
+    return {
+      ...base,
+      suggestedDoseMlPerDay: currentDoseMlPerDay,
+      doseChangeMlPerDay: 0,
+      recommended_dosing: currentDoseMlPerDay,
+      adjustment_percentage: 0,
+      action,
+      reasonCode,
+      reasonText,
+      reason: reasonText,
+      canApply: false,
+      nextAdjustmentCondition,
+      khDosingStatus: action === "MAINTAIN" ? "維持" : action === "KH_PRIORITY" ? "優先處理" : "觀察",
+      safetyWarnings: [...safetyWarnings, ...extraWarnings],
+    };
+  };
+
+  if (currentValue >= targetRange.min && currentValue <= targetRange.max) {
+    return observeResult({
+      reasonCode: "KH_IN_TARGET_MAINTAIN",
+      reasonText: "KH 已位於目標區間，目前滴定量可維持不變。",
+      action: "MAINTAIN",
+    });
+  }
+
+  if (currentValue >= targetRange.max) return null;
+
+  if (inObservationPeriod) {
+    return observeResult({
+      reasonCode: priorityLow ? "KH_PRIORITY_LOW_OBSERVATION_PERIOD" : "KH_OBSERVATION_PERIOD_ACTIVE",
+      reasonText: priorityLow
+        ? "KH 已低於優先處理門檻，但上次調整後尚未滿 7 天，先確認量測與滴定設備，觀察期內不自動再次增加。"
+        : "上次調整後尚未滿 7 天，仍在觀察期內；先維持目前滴定量，避免連續累加。",
+      action: priorityLow ? "KH_PRIORITY" : "OBSERVE",
+      extraWarnings: priorityLow ? ["KH 已低於優先處理門檻，請優先確認量測、滴定設備與缸內消耗狀況。"] : [],
+    });
+  }
+
+  if (doseHistoryInsufficient) {
+    return observeResult({
+      reasonCode: priorityLow ? "KH_PRIORITY_LOW_HISTORY_INSUFFICIENT" : "KH_DOSE_HISTORY_INSUFFICIENT",
+      reasonText: priorityLow
+        ? "KH 已低於優先處理門檻，建議先確認量測與滴定設備；因缺少上次調整日期，不自動再次累加滴定量。"
+        : "缺少目前滴定量已維持滿 7 天的佐證，先觀察，不在資訊不足時連續增加。",
+      action: priorityLow ? "KH_PRIORITY" : "OBSERVE",
+      extraWarnings: priorityLow ? ["KH 已低於優先處理門檻，建議採小幅、分段方式調整並縮短量測間隔。"] : [],
+    });
+  }
+
+  if (priorityLow) {
+    const doseChangeMlPerDay = Math.min(rules.mildIncrease, DOSING_LIMITS.kh.maxMlChange);
+    const suggestedDoseMlPerDay = roundedDose(currentDoseMlPerDay + doseChangeMlPerDay);
+    const reasonText = "KH 已低於優先處理門檻，建議先確認量測與滴定設備，並採小幅、分段方式調整，避免一次修正過多。";
+    return {
+      ...base,
+      suggestedDoseMlPerDay,
+      doseChangeMlPerDay,
+      recommended_dosing: suggestedDoseMlPerDay,
+      adjustment_percentage: adjustmentPercentage(doseChangeMlPerDay, currentDoseMlPerDay),
+      action: "KH_PRIORITY",
+      reasonCode: "KH_PRIORITY_LOW_SMALL_INCREASE",
+      reasonText,
+      reason: reasonText,
+      canApply: suggestedDoseMlPerDay !== currentDoseMlPerDay,
+      nextAdjustmentCondition: `調整後重新開始至少 ${rules.minimumObservationDaysAfterAdjustment} 天觀察期，期間不得再次增加。`,
+      khDosingStatus: "優先處理",
+      safetyWarnings: [...safetyWarnings, "KH 已低於優先處理門檻，請優先確認量測、滴定設備與缸內消耗狀況。"],
+    };
+  }
+
+  if (significantDrop) {
+    const doseChangeMlPerDay = Math.min(rules.mildIncrease, DOSING_LIMITS.kh.maxMlChange);
+    const suggestedDoseMlPerDay = roundedDose(currentDoseMlPerDay + doseChangeMlPerDay);
+    const reasonText = "KH 較上次明顯下降，建議小幅增加滴定量並密切觀察，單次調整不超過 0.3 ml。";
+    return {
+      ...base,
+      suggestedDoseMlPerDay,
+      doseChangeMlPerDay,
+      recommended_dosing: suggestedDoseMlPerDay,
+      adjustment_percentage: adjustmentPercentage(doseChangeMlPerDay, currentDoseMlPerDay),
+      action: "INCREASE_SMALL",
+      reasonCode: "KH_SIGNIFICANT_DROP_SMALL_INCREASE",
+      reasonText,
+      reason: reasonText,
+      canApply: suggestedDoseMlPerDay !== currentDoseMlPerDay,
+      nextAdjustmentCondition: `調整後重新開始至少 ${rules.minimumObservationDaysAfterAdjustment} 天觀察期，期間不得再次增加。`,
+      khDosingStatus: "小幅增加",
+    };
+  }
+
+  if (lowCount >= rules.minimumLowCountForAdjustment && !isStable) {
+    return observeResult({
+      reasonCode: "KH_LOW_UNSTABLE_VERIFY_FIRST",
+      reasonText: "KH 已連續偏低但短期波動仍需確認，先維持目前滴定量，避免因測量誤差造成過度修正。",
+    });
+  }
+
+  if (lowCount >= rules.minimumLowCountForAdjustment) {
+    const doseChangeMlPerDay = Math.min(rules.mildIncrease, DOSING_LIMITS.kh.maxMlChange);
+    const suggestedDoseMlPerDay = roundedDose(currentDoseMlPerDay + doseChangeMlPerDay);
+    const reasonText = "KH 已連續多次低於目標，且目前滴定量未能使數值回升，因此進行小幅調整。";
+    return {
+      ...base,
+      suggestedDoseMlPerDay,
+      doseChangeMlPerDay,
+      recommended_dosing: suggestedDoseMlPerDay,
+      adjustment_percentage: adjustmentPercentage(doseChangeMlPerDay, currentDoseMlPerDay),
+      action: "INCREASE_SMALL",
+      reasonCode: "KH_CONSECUTIVE_LOW_SMALL_INCREASE",
+      reasonText,
+      reason: reasonText,
+      canApply: suggestedDoseMlPerDay !== currentDoseMlPerDay,
+      nextAdjustmentCondition: `調整後重新開始至少 ${rules.minimumObservationDaysAfterAdjustment} 天觀察期，期間不得再次增加。`,
+      khDosingStatus: "小幅增加",
+    };
+  }
+
+  return observeResult({
+    reasonCode: "KH_LOW_STABLE_OBSERVE",
+    reasonText: "KH 略低但趨勢穩定，先觀察，避免因單次測量或頻繁調整造成波動。",
+  });
+}
+
 function isConsecutiveHighRising(currentValue, previousValue, targetRange) {
   return Number.isFinite(previousValue)
     && previousValue > targetRange.max
@@ -243,6 +437,8 @@ export function calculateDosingRecommendation({
   recoveryContext = {},
   stabilityContext = {},
   observeContext = {},
+  daysSinceLastDoseAdjustment = null,
+  hasRecentDoseAdjustment = false,
 }) {
   const param = PARAMETERS.find((item) => item.key === parameter);
   const dailyDelta = previousValue === null || daysBetweenTests === null ? null : (currentValue - previousValue) / daysBetweenTests;
@@ -397,6 +593,28 @@ export function calculateDosingRecommendation({
       recoveryContext,
       observeContext,
     });
+  }
+
+  if (parameter === "kh") {
+    const khConsecutiveLowCount = Number.isFinite(Number(stabilityContext.consecutiveLowCount))
+      ? Number(stabilityContext.consecutiveLowCount)
+      : stabilityContext.consecutiveOutOfRange;
+    const khRecommendation = evaluateKhDosingStability({
+      currentValue,
+      previousValue,
+      targetRange,
+      currentDoseMlPerDay,
+      consecutiveLowCount: khConsecutiveLowCount,
+      daysSinceLastDoseAdjustment,
+      hasRecentDoseAdjustment,
+      safetyWarnings,
+      confidenceLevel,
+      dailyDelta,
+      speed,
+      recoveryContext,
+      observeContext,
+    });
+    if (khRecommendation) return khRecommendation;
   }
 
   if (statusCode === "CRITICAL_HIGH") {
@@ -599,15 +817,7 @@ export function calculateDosingRecommendation({
     observeContext,
     khInRangeTrendMicroAdjust ? "KH_IN_RANGE_TREND_MICRO_ADJUST" : "",
   );
-  const minimumKhIncreaseMlPerDay = khLowMinimumIncrease({
-    parameter,
-    currentValue,
-    direction,
-    recoveryContext,
-  });
-  const doseChangeMlPerDay = minimumKhIncreaseMlPerDay > 0
-    ? Number(Math.max(boundedChangeMlPerDay, minimumKhIncreaseMlPerDay).toFixed(1))
-    : boundedChangeMlPerDay;
+  const doseChangeMlPerDay = boundedChangeMlPerDay;
   if (doseChangeMlPerDay === 0) {
     return observeOnlyResult({
       currentDoseMlPerDay,
@@ -626,8 +836,6 @@ export function calculateDosingRecommendation({
   let finalReasonText = reasonText;
   if (recoveryContext.event_recovery_mode) {
     finalReasonText = `${reasonText} 目前處於設備恢復期，先建立 temporary baseline，至少觀察 2-3 次正常測量後再恢復完整演算法。`;
-  } else if (minimumKhIncreaseMlPerDay > boundedChangeMlPerDay) {
-    finalReasonText = `${reasonText} KH 已低於 7.8，套用最低調整幅度，避免保守係數讓建議低於滴定機實務解析度。`;
   }
   return {
     suggestedDoseMlPerDay,

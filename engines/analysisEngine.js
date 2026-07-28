@@ -13,6 +13,7 @@ export function analyzeTank({
   events = [],
   maintenance = [],
   livestock = [],
+  doseApplications = [],
 }) {
   const { latest, previous } = latestRecords(records);
   if (!latest) return null;
@@ -53,6 +54,11 @@ export function analyzeTank({
       daysBetweenTests: intervalDays,
       records,
     });
+    const doseAdjustmentAge = latestDoseAdjustmentAge({
+      doseApplications,
+      parameter: param.key,
+      latestDate: latest.date,
+    });
     let recommendation = calculateDosingRecommendation({
       parameter: param.key,
       currentValue: value,
@@ -67,6 +73,8 @@ export function analyzeTank({
       recoveryContext: elementRecoveryContext,
       stabilityContext,
       observeContext,
+      daysSinceLastDoseAdjustment: doseAdjustmentAge.daysSinceLastDoseAdjustment,
+      hasRecentDoseAdjustment: doseAdjustmentAge.hasRecentDoseAdjustment,
     });
     if (!isMeasured) {
       recommendation = {
@@ -142,6 +150,11 @@ export function analyzeTank({
       stableLock: stabilityContext.stableLock,
       withinDeadZone: stabilityContext.withinDeadZone,
       observe_mode: recommendation.observe_mode,
+      nextAdjustmentCondition: recommendation.nextAdjustmentCondition || "",
+      khDosingStatus: recommendation.khDosingStatus || "",
+      khConsecutiveLowCount: recommendation.khConsecutiveLowCount ?? stabilityContext.consecutiveLowCount ?? 0,
+      daysSinceLastDoseAdjustment: recommendation.daysSinceLastDoseAdjustment,
+      observationDaysRemaining: recommendation.observationDaysRemaining || 0,
     };
   });
 
@@ -153,4 +166,51 @@ export function analyzeTank({
     observeContext,
     rows,
   };
+}
+
+function parseDate(value) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function dateOnly(value) {
+  const parsed = parseDate(value);
+  return parsed ? parsed.toISOString().slice(0, 10) : "";
+}
+
+function applicationDate(application) {
+  return parseDate(
+    application.appliedAt
+    || application.date
+    || application.createdAt
+    || application.updatedAt,
+  );
+}
+
+function latestDoseAdjustmentAge({ doseApplications = [], parameter, latestDate }) {
+  const latestMeasurementDate = parseDate(latestDate);
+  if (!latestMeasurementDate) {
+    return { daysSinceLastDoseAdjustment: null, hasRecentDoseAdjustment: false };
+  }
+  const matchingApplications = doseApplications
+    .filter((application) => (application.parameter || application.key) === parameter)
+    .map((application) => ({ application, date: applicationDate(application) }))
+    .filter((item) => item.date && item.date <= latestMeasurementDate)
+    .sort((a, b) => a.date - b.date);
+  const latestApplication = matchingApplications.at(-1);
+  if (!latestApplication) {
+    return { daysSinceLastDoseAdjustment: null, hasRecentDoseAdjustment: false };
+  }
+  const days = daysBetweenCalendarDates(dateOnly(latestApplication.date), dateOnly(latestMeasurementDate));
+  return {
+    daysSinceLastDoseAdjustment: days,
+    hasRecentDoseAdjustment: true,
+  };
+}
+
+function daysBetweenCalendarDates(start, end) {
+  const startDate = parseDate(start);
+  const endDate = parseDate(end);
+  if (!startDate || !endDate) return null;
+  return Math.floor((endDate - startDate) / 86400000);
 }

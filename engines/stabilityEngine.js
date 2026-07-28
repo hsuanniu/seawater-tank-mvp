@@ -93,6 +93,7 @@ export function buildStabilityContext({
   const values = recentMeasuredRecords.map((record) => record.value);
   const fallbackValues = values.length ? values : [previousValue, currentValue].filter(Number.isFinite);
   let consecutiveOutOfRange = 0;
+  let consecutiveLowCount = 0;
   let consecutiveDrops = 0;
   let consecutiveDropTotal = 0;
   let consecutiveDropDays = 0;
@@ -100,6 +101,11 @@ export function buildStabilityContext({
   for (let index = fallbackValues.length - 1; index >= 0; index -= 1) {
     if (rangeSide(fallbackValues[index], targetRange) !== currentSide || currentSide === "inside") break;
     consecutiveOutOfRange += 1;
+  }
+
+  for (let index = fallbackValues.length - 1; index >= 0; index -= 1) {
+    if (rangeSide(fallbackValues[index], targetRange) !== "low") break;
+    consecutiveLowCount += 1;
   }
 
   const requiredSamples = REQUIRED_OUT_OF_RANGE_SAMPLES[parameter] ?? 2;
@@ -129,6 +135,7 @@ export function buildStabilityContext({
     inTargetRange: currentSide === "inside",
     inStabilityRange,
     consecutiveOutOfRange,
+    consecutiveLowCount,
     consecutiveDrops,
     consecutiveDropTotal,
     consecutiveDropDays,

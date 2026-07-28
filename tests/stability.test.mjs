@@ -3,6 +3,7 @@ import test from "node:test";
 
 import { analyzeTank } from "../engines/analysisEngine.js";
 import { calculateDosingRecommendation, classify } from "../engines/safetyEngine.js";
+import { buildStabilityContext } from "../engines/stabilityEngine.js";
 import { createDoseApplicationEntry } from "../modules/dosingModule.js";
 import { buildMeasurementRecord } from "../modules/measurementModule.js";
 import { DEFAULT_TANK } from "../modules/tankModule.js";
@@ -242,38 +243,224 @@ test("KH low but already rising observes instead of increasing aggressively", ()
     trendText: "上升",
   }));
 
-  assert.equal(result.reasonCode, "KH_LOW_BUT_RISING_OBSERVE");
+  assert.equal(result.reasonCode, "KH_PRIORITY_LOW_HISTORY_INSUFFICIENT");
+  assert.equal(result.action, "KH_PRIORITY");
   assert.equal(result.canApply, false);
   assert.equal(result.doseChangeMlPerDay, 0);
 });
 
-test("KH low minimum adjustment avoids sub-practical increases", () => {
+test("KH low values wait for confirmed trend and observation period before increasing", () => {
   const kh77 = calculateDosingRecommendation(dosingInput("kh", {
     currentValue: 7.7,
-    previousValue: 7.9,
+    previousValue: 7.7,
     targetRange: { min: 8, max: 9 },
-    currentDoseMlPerDay: 10.8,
+    currentDoseMlPerDay: 10.9,
     tankVolumeLiters: 65,
     statusCode: classify(7.7, { min: 8, max: 9 }, "kh").code,
-    trendText: "下降",
-  }));
-  const kh75 = calculateDosingRecommendation(dosingInput("kh", {
-    currentValue: 7.5,
-    previousValue: 7.8,
-    targetRange: { min: 8, max: 9 },
-    currentDoseMlPerDay: 10.8,
-    tankVolumeLiters: 65,
-    statusCode: classify(7.5, { min: 8, max: 9 }, "kh").code,
-    trendText: "下降",
+    trendText: "持平",
+    stabilityContext: { consecutiveLowCount: 2 },
   }));
 
-  assert.equal(kh77.reasonCode, "LOW_SMALL_INCREASE");
-  assert.equal(kh77.doseChangeMlPerDay, 0.2);
-  assert.equal(kh77.suggestedDoseMlPerDay, 11);
-  assert.match(kh77.reasonText, /最低調整幅度/);
-  assert.equal(kh75.reasonCode, "LOW_SMALL_INCREASE");
-  assert.equal(kh75.doseChangeMlPerDay, 0.3);
-  assert.equal(kh75.suggestedDoseMlPerDay, 11.1);
+  assert.equal(kh77.reasonCode, "KH_LOW_STABLE_OBSERVE");
+  assert.equal(kh77.action, "OBSERVE");
+  assert.equal(kh77.doseChangeMlPerDay, 0);
+  assert.equal(kh77.suggestedDoseMlPerDay, 10.9);
+  assert.match(kh77.nextAdjustmentCondition, /連續第 3 次低於 8/);
+});
+
+test("KH consecutive low count resets after returning to target range", () => {
+  const tank = {
+    ...DEFAULT_TANK,
+    targets: {
+      ...DEFAULT_TANK.targets,
+      kh: { min: 8, max: 9 },
+    },
+  };
+  const analysis = analyzeTank({
+    tank,
+    records: [
+      completeMeasurement({ id: "kh-low-before", date: "2026-06-01", kh: 7.7 }),
+      completeMeasurement({ id: "kh-in-target", date: "2026-06-08", kh: 8.1 }),
+      completeMeasurement({ id: "kh-low-current", date: "2026-06-15", kh: 7.7 }),
+    ],
+    dosing: { kh: 10.9, ca: 4, mg: 1, status: {} },
+  });
+  const kh = analysis.rows.find((row) => row.key === "kh");
+
+  assert.equal(kh.khConsecutiveLowCount, 1);
+  assert.equal(kh.reasonCode, "KH_DOSE_HISTORY_INSUFFICIENT");
+  assert.equal(kh.doseChange, 0);
+  assert.equal(kh.newDose, 10.9);
+  assert.equal(kh.recommendationMode, "OBSERVE");
+});
+
+test("Stability context exposes consecutiveLowCount for formal KH analysis flow", () => {
+  const targetRange = { min: 8, max: 9 };
+  const records = [
+    completeMeasurement({ id: "kh-low-before", date: "2026-06-01", kh: 7.7 }),
+    completeMeasurement({ id: "kh-in-target", date: "2026-06-08", kh: 8.1 }),
+    completeMeasurement({ id: "kh-low-current", date: "2026-06-15", kh: 7.7 }),
+  ];
+  const context = buildStabilityContext({
+    parameter: "kh",
+    currentValue: 7.7,
+    previousValue: 8.1,
+    targetRange,
+    daysBetweenTests: 7,
+    records,
+  });
+
+  assert.equal(Object.hasOwn(context, "consecutiveLowCount"), true);
+  assert.equal(context.consecutiveLowCount, 1);
+  assert.equal(context.currentSide, "low");
+});
+
+test("KH consecutive low stability rules cover observation period, significant drops, and target return", () => {
+  const targetRange = { min: 8, max: 9 };
+  const stableTwo = calculateDosingRecommendation(dosingInput("kh", {
+    currentValue: 7.7,
+    previousValue: 7.7,
+    targetRange,
+    currentDoseMlPerDay: 10.9,
+    tankVolumeLiters: 200,
+    statusCode: classify(7.7, targetRange, "kh").code,
+    trendText: "持平",
+    stabilityContext: { consecutiveLowCount: 2 },
+  }));
+  const stableThreeAfterObservation = calculateDosingRecommendation(dosingInput("kh", {
+    currentValue: 7.7,
+    previousValue: 7.7,
+    targetRange,
+    currentDoseMlPerDay: 10.9,
+    tankVolumeLiters: 200,
+    statusCode: classify(7.7, targetRange, "kh").code,
+    trendText: "持平",
+    stabilityContext: { consecutiveLowCount: 3 },
+    daysSinceLastDoseAdjustment: 7,
+  }));
+  const firstLow = calculateDosingRecommendation(dosingInput("kh", {
+    currentValue: 7.9,
+    previousValue: 8.1,
+    targetRange,
+    currentDoseMlPerDay: 10.9,
+    tankVolumeLiters: 200,
+    statusCode: classify(7.9, targetRange, "kh").code,
+    trendText: "持平",
+    stabilityContext: { consecutiveLowCount: 1 },
+  }));
+  const significantDrop = calculateDosingRecommendation(dosingInput("kh", {
+    currentValue: 7.6,
+    previousValue: 8,
+    targetRange,
+    currentDoseMlPerDay: 10.9,
+    tankVolumeLiters: 200,
+    statusCode: classify(7.6, targetRange, "kh").code,
+    trendText: "下降",
+    stabilityContext: { consecutiveLowCount: 1 },
+    daysSinceLastDoseAdjustment: 7,
+  }));
+  const inObservationPeriod = calculateDosingRecommendation(dosingInput("kh", {
+    currentValue: 7.7,
+    previousValue: 7.7,
+    targetRange,
+    currentDoseMlPerDay: 11.2,
+    tankVolumeLiters: 200,
+    statusCode: classify(7.7, targetRange, "kh").code,
+    trendText: "持平",
+    stabilityContext: { consecutiveLowCount: 3 },
+    daysSinceLastDoseAdjustment: 3,
+  }));
+  const backInTarget = calculateDosingRecommendation(dosingInput("kh", {
+    currentValue: 8,
+    previousValue: 7.7,
+    targetRange,
+    currentDoseMlPerDay: 11.2,
+    tankVolumeLiters: 200,
+    statusCode: classify(8, targetRange, "kh").code,
+    trendText: "上升",
+    stabilityContext: { consecutiveLowCount: 0 },
+    daysSinceLastDoseAdjustment: 7,
+  }));
+
+  assert.equal(stableTwo.suggestedDoseMlPerDay, 10.9);
+  assert.equal(stableTwo.doseChangeMlPerDay, 0);
+  assert.equal(stableTwo.action, "OBSERVE");
+  assert.equal(stableThreeAfterObservation.suggestedDoseMlPerDay, 11.2);
+  assert.equal(stableThreeAfterObservation.doseChangeMlPerDay, 0.3);
+  assert.equal(stableThreeAfterObservation.action, "INCREASE_SMALL");
+  assert.equal(firstLow.suggestedDoseMlPerDay, 10.9);
+  assert.equal(firstLow.doseChangeMlPerDay, 0);
+  assert.equal(firstLow.action, "OBSERVE");
+  assert.equal(significantDrop.suggestedDoseMlPerDay, 11.2);
+  assert.equal(significantDrop.doseChangeMlPerDay <= 0.3, true);
+  assert.equal(significantDrop.action, "INCREASE_SMALL");
+  assert.equal(inObservationPeriod.suggestedDoseMlPerDay, 11.2);
+  assert.equal(inObservationPeriod.doseChangeMlPerDay, 0);
+  assert.equal(inObservationPeriod.action, "OBSERVE");
+  assert.equal(inObservationPeriod.observationDaysRemaining, 4);
+  assert.equal(backInTarget.suggestedDoseMlPerDay, 11.2);
+  assert.equal(backInTarget.doseChangeMlPerDay, 0);
+  assert.equal(backInTarget.action, "MAINTAIN");
+  assert.equal(backInTarget.khConsecutiveLowCount, 0);
+});
+
+test("KH boundary cases stay conservative and avoid floating point dose artifacts", () => {
+  const targetRange = { min: 8, max: 9 };
+  const exactThresholdDrop = calculateDosingRecommendation(dosingInput("kh", {
+    currentValue: 7.7,
+    previousValue: 8,
+    targetRange,
+    currentDoseMlPerDay: 10.9,
+    tankVolumeLiters: 200,
+    statusCode: classify(7.7, targetRange, "kh").code,
+    trendText: "下降",
+    stabilityContext: { consecutiveLowCount: 1 },
+    daysSinceLastDoseAdjustment: 7,
+  }));
+  const priorityLow = calculateDosingRecommendation(dosingInput("kh", {
+    currentValue: 7.4,
+    previousValue: 7.6,
+    targetRange,
+    currentDoseMlPerDay: 10.9,
+    tankVolumeLiters: 200,
+    statusCode: classify(7.4, targetRange, "kh").code,
+    trendText: "下降",
+    stabilityContext: { consecutiveLowCount: 3 },
+    daysSinceLastDoseAdjustment: 7,
+  }));
+  const priorityLowInObservation = calculateDosingRecommendation(dosingInput("kh", {
+    currentValue: 7.4,
+    previousValue: 7.4,
+    targetRange,
+    currentDoseMlPerDay: 11.2,
+    tankVolumeLiters: 200,
+    statusCode: classify(7.4, targetRange, "kh").code,
+    trendText: "持平",
+    stabilityContext: { consecutiveLowCount: 3 },
+    daysSinceLastDoseAdjustment: 2,
+  }));
+  const missingDoseAdjustmentDate = calculateDosingRecommendation(dosingInput("kh", {
+    currentValue: 7.7,
+    previousValue: 7.7,
+    targetRange,
+    currentDoseMlPerDay: 10.9,
+    tankVolumeLiters: 200,
+    statusCode: classify(7.7, targetRange, "kh").code,
+    trendText: "持平",
+    stabilityContext: { consecutiveLowCount: 3 },
+  }));
+
+  assert.equal(exactThresholdDrop.reasonCode, "KH_LOW_STABLE_OBSERVE");
+  assert.equal(exactThresholdDrop.doseChangeMlPerDay, 0);
+  assert.equal(priorityLow.action, "KH_PRIORITY");
+  assert.equal(priorityLow.khDosingStatus, "優先處理");
+  assert.equal(priorityLow.suggestedDoseMlPerDay, 11.2);
+  assert.equal(priorityLow.doseChangeMlPerDay, 0.3);
+  assert.equal(priorityLowInObservation.action, "KH_PRIORITY");
+  assert.equal(priorityLowInObservation.suggestedDoseMlPerDay, 11.2);
+  assert.equal(priorityLowInObservation.doseChangeMlPerDay, 0);
+  assert.equal(missingDoseAdjustmentDate.reasonCode, "KH_DOSE_HISTORY_INSUFFICIENT");
+  assert.equal(missingDoseAdjustmentDate.doseChangeMlPerDay, 0);
 });
 
 test("MG recovery mode limits changes to one percent and stays below high confidence", () => {
@@ -356,7 +543,7 @@ test("Stable Lock keeps the real-world stable case unchanged", () => {
     },
   });
 
-  for (const parameter of ["kh", "ca", "mg"]) {
+  for (const parameter of ["ca", "mg"]) {
     const row = analysis.rows.find((item) => item.key === parameter);
     assert.equal(row.reasonCode, "STABLE_LOCK_MAINTAIN", parameter);
     assert.equal(row.doseChange, 0, parameter);
@@ -364,6 +551,8 @@ test("Stable Lock keeps the real-world stable case unchanged", () => {
     assert.equal(row.canApplyRecommendation, false, parameter);
   }
 
+  assert.equal(analysis.rows.find((row) => row.key === "kh").reasonCode, "KH_IN_TARGET_MAINTAIN");
+  assert.equal(analysis.rows.find((row) => row.key === "kh").doseChange, 0);
   assert.equal(analysis.rows.find((row) => row.key === "kh").newDose, 10.3);
   assert.equal(analysis.rows.find((row) => row.key === "ca").newDose, 4);
   assert.equal(analysis.rows.find((row) => row.key === "mg").newDose, 0.8);
@@ -372,7 +561,7 @@ test("Stable Lock keeps the real-world stable case unchanged", () => {
   assert.equal(analysis.rows.find((row) => row.key === "k").reasonCode, "VALUE_CARRIED_FORWARD");
 });
 
-test("KH inside target range micro-adjusts when the weekly downward trend is clear", () => {
+test("KH inside target range maintains even when the weekly trend is downward", () => {
   const tank = {
     ...DEFAULT_TANK,
     volume: 200,
@@ -391,15 +580,15 @@ test("KH inside target range micro-adjusts when the weekly downward trend is cle
   });
   const kh = analysis.rows.find((row) => row.key === "kh");
 
-  assert.equal(kh.reasonCode, "KH_IN_RANGE_TREND_MICRO_ADJUST");
-  assert.equal(kh.recommendationMode, "MICRO_ADJUST");
-  assert.equal(kh.doseChange, 0.5);
-  assert.equal(kh.newDose, 10.7);
-  assert.equal(kh.canApplyRecommendation, true);
-  assert.match(kh.recommendationReason, /KH仍位於目標範圍/);
+  assert.equal(kh.reasonCode, "KH_IN_TARGET_MAINTAIN");
+  assert.equal(kh.recommendationMode, "MAINTAIN");
+  assert.equal(kh.doseChange, 0);
+  assert.equal(kh.newDose, 10.2);
+  assert.equal(kh.canApplyRecommendation, false);
+  assert.match(kh.recommendationReason, /位於目標區間/);
 });
 
-test("KH enters trend micro-adjust mode after two consecutive drops inside target range", () => {
+test("KH remains unchanged after two consecutive drops inside target range", () => {
   const tank = {
     ...DEFAULT_TANK,
     volume: 200,
@@ -419,12 +608,12 @@ test("KH enters trend micro-adjust mode after two consecutive drops inside targe
   });
   const kh = analysis.rows.find((row) => row.key === "kh");
 
-  assert.equal(kh.reasonCode, "KH_IN_RANGE_TREND_MICRO_ADJUST");
-  assert.equal(kh.doseChange, 0.5);
-  assert.equal(kh.newDose, 10.7);
+  assert.equal(kh.reasonCode, "KH_IN_TARGET_MAINTAIN");
+  assert.equal(kh.doseChange, 0);
+  assert.equal(kh.newDose, 10.2);
 });
 
-test("KH in-range trend micro-adjust keeps nano tanks extra conservative", () => {
+test("KH in-range trend keeps nano tanks unchanged", () => {
   const tank = {
     ...DEFAULT_TANK,
     volume: 65,
@@ -443,10 +632,9 @@ test("KH in-range trend micro-adjust keeps nano tanks extra conservative", () =>
   });
   const kh = analysis.rows.find((row) => row.key === "kh");
 
-  assert.equal(kh.reasonCode, "KH_IN_RANGE_TREND_MICRO_ADJUST");
-  assert.ok(kh.doseChange > 0);
-  assert.ok(kh.doseChange < 0.5);
-  assert.ok(kh.doseChange <= 1);
+  assert.equal(kh.reasonCode, "KH_IN_TARGET_MAINTAIN");
+  assert.equal(kh.doseChange, 0);
+  assert.equal(kh.newDose, 10.2);
 });
 
 test("KH inside target range maintains when movement is small and not a confirmed trend", () => {
@@ -467,7 +655,7 @@ test("KH inside target range maintains when movement is small and not a confirme
   });
   const kh = analysis.rows.find((row) => row.key === "kh");
 
-  assert.equal(kh.reasonCode, "WITHIN_TARGET");
+  assert.equal(kh.reasonCode, "KH_IN_TARGET_MAINTAIN");
   assert.equal(kh.doseChange, 0);
   assert.equal(kh.canApplyRecommendation, false);
 });
@@ -492,7 +680,11 @@ test("Stable Lock also protects stable values when an older saved target range r
     dosing: { kh: 10.3, ca: 4, mg: 0.8, status: {} },
   });
 
-  for (const parameter of ["kh", "ca", "mg"]) {
+  const kh = analysis.rows.find((item) => item.key === "kh");
+  assert.equal(kh.reasonCode, "KH_LOW_STABLE_OBSERVE");
+  assert.equal(kh.doseChange, 0);
+
+  for (const parameter of ["ca", "mg"]) {
     const row = analysis.rows.find((item) => item.key === parameter);
     assert.equal(row.reasonCode, "STABLE_LOCK_MAINTAIN", parameter);
     assert.equal(row.doseChange, 0, parameter);
@@ -530,7 +722,7 @@ test("CA high readings avoid automatic dose changes and escalate by trend", () =
   assert.equal(confirmedHigh.autoCalculationPaused, true);
 });
 
-test("KH low minimum floor applies after nano and recent-event conservatism", () => {
+test("KH low analysis does not auto-increase without a confirmed dose observation age", () => {
   const records = [
     completeMeasurement({ id: "kh-before", date: "2026-06-01", kh: 7.8 }),
     completeMeasurement({ id: "kh-current", date: "2026-06-08", kh: 7.3 }),
@@ -556,10 +748,12 @@ test("KH low minimum floor applies after nano and recent-event conservatism", ()
     }],
   }).rows.find((row) => row.key === "kh");
 
-  assert.equal(largeTank.doseChange, 0.3);
-  assert.equal(nanoTank.doseChange, 0.3);
+  assert.equal(largeTank.reasonCode, "KH_PRIORITY_LOW_HISTORY_INSUFFICIENT");
+  assert.equal(largeTank.doseChange, 0);
+  assert.equal(nanoTank.reasonCode, "KH_PRIORITY_LOW_HISTORY_INSUFFICIENT");
+  assert.equal(nanoTank.doseChange, 0);
   assert.equal(recentLargeWaterChange.observe_mode, true);
-  assert.equal(recentLargeWaterChange.doseChange, 0.3);
+  assert.equal(recentLargeWaterChange.doseChange, 0);
 });
 
 test("Tank Store records recovery events without breaking existing tank data", () => {

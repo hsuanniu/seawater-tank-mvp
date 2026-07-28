@@ -22,6 +22,7 @@ export function actionText(action) {
     DECREASE_SMALL: "小幅減少",
     OBSERVE: "觀察",
     MANUAL_CONFIRM: "人工確認",
+    KH_PRIORITY: "優先處理",
     CONSIDER_REDUCE: "考慮降低",
     RESUME_THEN_OBSERVE: "恢復後觀察",
     DO_NOT_DOSE: "先不調整",
