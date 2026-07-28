@@ -390,6 +390,12 @@ function todayText() {
   return `${today.getFullYear()}-${month}-${date}`;
 }
 
+function latestMeasurementText(dateValue) {
+  const elapsedDays = daysSince(dateValue);
+  const relativeText = elapsedDays === 0 ? "今天" : elapsedDays === 1 ? "昨天" : `${elapsedDays} 天前`;
+  return `最新測量：${dateValue}（${relativeText}）`;
+}
+
 function buildMeasurementFromForm(data) {
   return buildMeasurementRecord(data, getSortedRecords(), {
     fallbackDate: todayText(),
@@ -636,9 +642,8 @@ function metricCardClass(row, focus) {
 
 function renderDashboard() {
   const analysis = analyze();
-  const salinityText = analysis?.latest?.salinity ? ` | 比重 ${formatNumber(analysis.latest.salinity, 3)}` : "";
   document.querySelector("#dashboardMeta").textContent = analysis
-    ? `最新紀錄：${analysis.latest.date}${analysis.daysSincePrevious !== null ? ` | 距上次 ${analysis.daysSincePrevious} 天` : ""}${salinityText}`
+    ? latestMeasurementText(analysis.latest.date)
     : "尚未建立紀錄";
 
   const cards = document.querySelector("#latestCards");
