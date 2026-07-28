@@ -1,4 +1,5 @@
 import { nutrientFocusText, nutrientNotes } from "./components/aiExplanationModule.js";
+import { createAppVersionFooter } from "./components/appVersionFooter.js";
 import { actionText, changeText, confidenceText, dailyDeltaText, doseSuggestionText, formatDoseSentence, primaryFocus } from "./components/dashboardModule.js?v=20260706-dosing-manual-confirm";
 import { createMeasurementSopController } from "./components/measurementSopComponent.js?v=20260617-sop-timer-fix";
 import { analyzeTank } from "./engines/analysisEngine.js?v=20260706-dosing-manual-confirm";
@@ -18,8 +19,8 @@ const CLOUD_CONFIG_KEY = "seawaterTankCloudConfig.v1";
 const CLOUD_TABLE = "user_app_state";
 const APP_VERSION_STORAGE_KEY = "seawaterTankAppVersion.v1";
 const FALLBACK_VERSION = {
-  current_version: "2026.07.08-ocean-light-ui",
-  build_time: "2026-07-08T16:09:50+08:00",
+  version: "0.0.0",
+  current_version: "0.0.0",
 };
 const DEBUG_MODE = false;
 let supabaseClient = null;
@@ -31,6 +32,10 @@ let feedbackTimer = null;
 let historyMode = "active";
 let measurementMethodDraft = {};
 let tankFormMode = "edit";
+const AppVersionFooter = createAppVersionFooter({
+  root: document.querySelector("#appVersionFooter"),
+  fallback: FALLBACK_VERSION,
+});
 
 const TankStore = createTankStore({
   storageKey: STORAGE_KEY,
@@ -162,6 +167,7 @@ async function refreshToLatestVersion() {
 
 async function checkAppVersion() {
   renderVersionPanel(FALLBACK_VERSION);
+  void AppVersionFooter.refresh();
   try {
     const response = await fetch(`version.json?ts=${Date.now()}`, {
       cache: "no-store",

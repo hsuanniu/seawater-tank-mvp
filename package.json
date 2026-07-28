@@ -1,9 +1,12 @@
 {
   "name": "seawater-tank-mvp",
+  "version": "1.0.0",
+  "displayName": "Seawater Tank",
   "private": true,
   "type": "module",
   "scripts": {
-    "lint": "node --check app.js && node --check app.module.js && node --check sw.js && node --check components/aiExplanationModule.js && node --check components/dashboardModule.js && node --check components/measurementSopComponent.js && node --check engines/analysisEngine.js && node --check engines/eventRecoveryEngine.js && node --check engines/safetyEngine.js && node --check engines/stabilityEngine.js && node --check modules/additiveLogModule.js && node --check modules/bioLoadModule.js && node --check modules/dosingModule.js && node --check modules/eventTimelineModule.js && node --check modules/feedingLogModule.js && node --check modules/measurementModule.js && node --check modules/measurementSopModule.js && node --check modules/tankModule.js && node --check services/backupService.js && node --check services/formatService.js && node --check services/retentionService.js && node --check services/storageService.js && node --check services/tankStore.js && node --check tests/eventTimeline.test.mjs && node --check tests/measurementSop.test.mjs && node --check tests/stability.test.mjs",
+    "lint": "node --check app.js && node --check app.module.js && node --check sw.js && node --check components/aiExplanationModule.js && node --check components/appVersionFooter.js && node --check components/dashboardModule.js && node --check components/measurementSopComponent.js && node --check engines/analysisEngine.js && node --check engines/eventRecoveryEngine.js && node --check engines/safetyEngine.js && node --check engines/stabilityEngine.js && node --check modules/additiveLogModule.js && node --check modules/bioLoadModule.js && node --check modules/dosingModule.js && node --check modules/eventTimelineModule.js && node --check modules/feedingLogModule.js && node --check modules/measurementModule.js && node --check modules/measurementSopModule.js && node --check modules/tankModule.js && node --check services/backupService.js && node --check services/formatService.js && node --check services/retentionService.js && node --check services/storageService.js && node --check services/tankStore.js && node --check scripts/generateVersionMetadata.mjs && node --check tests/eventTimeline.test.mjs && node --check tests/measurementSop.test.mjs && node --check tests/stability.test.mjs",
+    "prebuild": "node scripts/generateVersionMetadata.mjs",
     "build": "npm run lint && npm test",
     "test": "node --test tests/*.test.mjs"
   }

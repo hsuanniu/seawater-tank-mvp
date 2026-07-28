@@ -1,4 +1,4 @@
-const CACHE_NAME = "seawater-tank-mvp-v38";
+const CACHE_NAME = "seawater-tank-mvp-v39";
 const APP_SHELL = [
   "./",
   "index.html",
@@ -25,6 +25,7 @@ const APP_SHELL = [
   "engines/eventRecoveryEngine.js",
   "engines/stabilityEngine.js",
   "components/aiExplanationModule.js",
+  "components/appVersionFooter.js",
   "components/dashboardModule.js",
   "components/measurementSopComponent.js",
   "types/domainTypes.js",
