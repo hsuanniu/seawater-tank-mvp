@@ -31,6 +31,8 @@ export const KH_DOSING_STABILITY_RULES = {
   stableTolerance: 0.2,
   significantDropThreshold: 0.3,
   mildIncrease: 0.3,
+  stableLowFirstStep: 0.2,
+  stableLowConfirmedStep: 0.4,
   minimumLowCountForAdjustment: 3,
   minimumObservationDaysAfterAdjustment: 7,
   priorityLowThreshold: 7.5,
@@ -79,6 +81,8 @@ function boundedDoseChange(
     const isNormalFineTune = statusCode === "NORMAL";
     if (adjustmentProfile === "KH_IN_RANGE_TREND_MICRO_ADJUST") {
       baseLimit = Math.min(Math.max(currentDoseMlPerDay * 0.05, 0.5), 0.8);
+    } else if (adjustmentProfile === "CA_OPTIONAL_MICRO_ADJUST") {
+      baseLimit = 0.2;
     } else {
       const percentLimit = currentDoseMlPerDay * (isNormalFineTune ? limits.normalPercent : limits.percent);
       const mlLimit = isNormalFineTune ? limits.normalMaxMlChange : limits.maxMlChange;
@@ -86,7 +90,9 @@ function boundedDoseChange(
     }
   }
 
-  const nanoFactor = Number.isFinite(tankVolumeLiters) && tankVolumeLiters < 100 ? 0.5 : 1;
+  const nanoFactor = adjustmentProfile === "CA_OPTIONAL_MICRO_ADJUST"
+    ? 1
+    : Number.isFinite(tankVolumeLiters) && tankVolumeLiters < 100 ? 0.5 : 1;
   const observeFactor = observeContext.observe_mode ? observeContext.adjustment_factor || 0.5 : 1;
   const conservativeLimit = Math.floor(baseLimit * nanoFactor * observeFactor * 10) / 10;
   return Number((direction * conservativeLimit).toFixed(1));
@@ -221,9 +227,14 @@ export function evaluateKhDosingStability({
   speed = { tooFast: false, text: "尚無足夠資料" },
   recoveryContext = {},
   observeContext = {},
+  daysBetweenTests = null,
+  tankVolumeLiters = null,
+  consecutiveDrops = 0,
 } = {}) {
   const rules = KH_DOSING_STABILITY_RULES;
-  const lowCount = currentValue < targetRange.min ? Math.max(1, Number(consecutiveLowCount) || 1) : 0;
+  const lowCount = currentValue < targetRange.min || currentValue < rules.targetMin
+    ? Math.max(1, Number(consecutiveLowCount) || 1)
+    : 0;
   const deltaFromPrevious = Number.isFinite(previousValue) ? currentValue - previousValue : null;
   const isStable = deltaFromPrevious !== null && Math.abs(deltaFromPrevious) <= rules.stableTolerance;
   const significantDrop = deltaFromPrevious !== null && previousValue - currentValue > rules.significantDropThreshold;
@@ -271,7 +282,62 @@ export function evaluateKhDosingStability({
     };
   };
 
-  if (currentValue >= targetRange.min && currentValue <= targetRange.max) {
+  const stableLowMicroEligible = Boolean(
+    isStable
+    && daysBetweenTests >= 5
+    && currentValue >= rules.priorityLowThreshold
+    && currentValue < rules.targetMin
+    && currentDoseMlPerDay > 0
+    && !recoveryContext.event_recovery_mode
+    && !observeContext.observe_mode
+    && !inObservationPeriod
+  );
+
+  if (stableLowMicroEligible) {
+    const preferredStep = lowCount >= rules.minimumLowCountForAdjustment
+      ? rules.stableLowConfirmedStep
+      : rules.stableLowFirstStep;
+    const volumeCap = Number.isFinite(tankVolumeLiters) && tankVolumeLiters < 100 ? 0.4 : 0.5;
+    const doseChangeMlPerDay = Math.min(preferredStep, volumeCap);
+    const suggestedDoseMlPerDay = roundedDose(currentDoseMlPerDay + doseChangeMlPerDay);
+    const reasonText = "KH 已穩定但低於偏好區 8.0 dKH，這不是急迫修正；若希望慢慢靠近 8.0，可做小幅微調並觀察一週。";
+    return {
+      ...base,
+      suggestedDoseMlPerDay,
+      doseChangeMlPerDay,
+      recommended_dosing: suggestedDoseMlPerDay,
+      adjustment_percentage: adjustmentPercentage(doseChangeMlPerDay, currentDoseMlPerDay),
+      action: "MICRO_ADJUST",
+      reasonCode: "KH_STABLE_LOW_OPTIONAL_MICRO_ADJUST",
+      reasonText,
+      reason: reasonText,
+      canApply: suggestedDoseMlPerDay !== currentDoseMlPerDay,
+      nextAdjustmentCondition: "若下週 KH 已回到 7.9–8.1 或開始上升，優先維持，不要連續加量。",
+      khDosingStatus: "可選微調",
+      safetyWarnings: [
+        ...safetyWarnings,
+        "KH 仍屬穩定狀態，本次微調屬於可選項；若近期有換水、手動補 KH 或滴定異常，請先觀察。",
+      ],
+    };
+  }
+
+  const inTargetButNeedsTrendCheck = Boolean(
+    currentValue >= targetRange.min
+    && currentValue <= targetRange.max
+    && daysBetweenTests >= 5
+    && (
+      (deltaFromPrevious !== null && previousValue - currentValue >= 0.4)
+      || (
+        Number(consecutiveLowCount) >= 2
+        && deltaFromPrevious !== null
+        && previousValue > currentValue
+      )
+      || Number(consecutiveDrops) >= 2
+      || lowCount >= rules.minimumLowCountForAdjustment
+    )
+  );
+
+  if (currentValue >= targetRange.min && currentValue <= targetRange.max && !inTargetButNeedsTrendCheck) {
     return observeResult({
       reasonCode: "KH_IN_TARGET_MAINTAIN",
       reasonText: "KH 已位於目標區間，目前滴定量可維持不變。",
@@ -279,7 +345,7 @@ export function evaluateKhDosingStability({
     });
   }
 
-  if (currentValue >= targetRange.max) return null;
+  if (currentValue >= targetRange.max || inTargetButNeedsTrendCheck) return null;
 
   if (inObservationPeriod) {
     return observeResult({
@@ -448,6 +514,39 @@ export function calculateDosingRecommendation({
 
   if (!APPLICABLE_DOSE_KEYS.includes(parameter)) {
     const nutrientReason = nutrientRecoveryReason(parameter, currentValue, previousValue, targetRange, trendText);
+    const potassiumLowWithDoserOff = Boolean(
+      parameter === "k"
+      && currentValue < targetRange.min
+      && doseStatus
+      && doseStatus.enabled === false
+    );
+    if (potassiumLowWithDoserOff) {
+      const reasonText = "鉀(K) 低於建議範圍，且 K+ 目前關閉；可考慮開啟既有低量 K+ 補充，先跑一週後再確認趨勢。";
+      return {
+        suggestedDoseMlPerDay: currentDoseMlPerDay,
+        doseChangeMlPerDay: 0,
+        recommended_dosing: currentDoseMlPerDay,
+        adjustment_percentage: 0,
+        action: "OBSERVE",
+        reasonCode: "K_LOW_KPLUS_OFF_CONSIDER_ENABLE",
+        reasonText,
+        reason: reasonText,
+        safetyWarnings: [
+          "鉀(K) 不進行自動滴定量計算；只提醒目前 K+ 關閉且數值偏低。",
+          "請避免一次大量補鉀，先用低量、固定節奏觀察一週。",
+        ],
+        confidenceLevel: "INSUFFICIENT",
+        confidence_score: "low",
+        canApply: false,
+        dailyDelta,
+        trendTooFast: speed.tooFast,
+        trendSpeedText: speed.text,
+        event_recovery_mode: false,
+        observe_mode: Boolean(observeContext.observe_mode),
+        affected_element: null,
+        warning_message: "鉀(K) 偏低時仍需人工確認測試與產品劑量，不自動套用滴定。",
+      };
+    }
     const stableReason = stabilityContext.inStabilityRange && stabilityContext.withinDeadZone
       ? `${param.label} 位於建議範圍內，且變化落在測量誤差容忍區，維持目前管理方式。`
       : "";
@@ -515,6 +614,9 @@ export function calculateDosingRecommendation({
       speed,
       recoveryContext,
       observeContext,
+      daysBetweenTests,
+      tankVolumeLiters,
+      consecutiveDrops: stabilityContext.consecutiveDrops,
     });
   }
 
@@ -597,8 +699,14 @@ export function calculateDosingRecommendation({
 
   if (parameter === "kh") {
     const khConsecutiveLowCount = Number.isFinite(Number(stabilityContext.consecutiveLowCount))
-      ? Number(stabilityContext.consecutiveLowCount)
-      : stabilityContext.consecutiveOutOfRange;
+      ? Math.max(
+        Number(stabilityContext.consecutiveLowCount),
+        Number(stabilityContext.consecutivePreferredLowCount) || 0,
+      )
+      : Math.max(
+        Number(stabilityContext.consecutiveOutOfRange) || 0,
+        Number(stabilityContext.consecutivePreferredLowCount) || 0,
+      );
     const khRecommendation = evaluateKhDosingStability({
       currentValue,
       previousValue,
@@ -613,6 +721,9 @@ export function calculateDosingRecommendation({
       speed,
       recoveryContext,
       observeContext,
+      daysBetweenTests,
+      tankVolumeLiters,
+      consecutiveDrops: stabilityContext.consecutiveDrops,
     });
     if (khRecommendation) return khRecommendation;
   }
@@ -652,11 +763,22 @@ export function calculateDosingRecommendation({
     });
   }
 
+  const preStableUpperZone = targetRange.max - targetSpan(targetRange) * 0.25;
+  const caStableHighRiseCandidate = Boolean(
+    parameter === "ca"
+    && statusCode === "NORMAL"
+    && daysBetweenTests >= 5
+    && Number.isFinite(previousValue)
+    && currentValue >= preStableUpperZone
+    && currentValue - previousValue >= 5
+  );
+
   if (
-    stabilityContext.stableLock
+    (stabilityContext.stableLock && !caStableHighRiseCandidate)
     || (
       stabilityContext.withinDeadZone
       && (stabilityContext.inTargetRange || !stabilityContext.hasConfirmedOutOfRange)
+      && !caStableHighRiseCandidate
     )
   ) {
     const stableLockActive = stabilityContext.stableLock;
@@ -719,6 +841,8 @@ export function calculateDosingRecommendation({
   const lowerZone = targetRange.min + targetSpan(targetRange) * 0.25;
   const upperZone = targetRange.max - targetSpan(targetRange) * 0.25;
   const khDropFromPrevious = previousValue - currentValue;
+  const caDropFromPrevious = previousValue - currentValue;
+  const caRiseFromPrevious = currentValue - previousValue;
   const khInRangeTrendMicroAdjust = Boolean(
     parameter === "kh"
     && statusCode === "NORMAL"
@@ -732,6 +856,21 @@ export function calculateDosingRecommendation({
         && stabilityContext.consecutiveDropDays >= 5
       )
     )
+  );
+  const caNormalDropMicroAdjust = Boolean(
+    parameter === "ca"
+    && statusCode === "NORMAL"
+    && daysBetweenTests >= 5
+    && !speed.tooFast
+    && caDropFromPrevious >= 15
+  );
+  const caNormalHighRiseMicroAdjust = Boolean(
+    parameter === "ca"
+    && statusCode === "NORMAL"
+    && daysBetweenTests >= 5
+    && !speed.tooFast
+    && currentValue >= upperZone
+    && caRiseFromPrevious >= 5
   );
 
   if (statusCode === "CRITICAL_HIGH" || statusCode === "HIGH") {
@@ -765,6 +904,16 @@ export function calculateDosingRecommendation({
     action = "MICRO_ADJUST";
     reasonCode = "KH_IN_RANGE_TREND_MICRO_ADJUST";
     reasonText = "KH仍位於目標範圍，但消耗量略高於目前滴定量，建議小幅提高滴定以維持穩定。";
+  } else if (caNormalDropMicroAdjust) {
+    direction = 1;
+    action = "MICRO_ADJUST";
+    reasonCode = "CA_NORMAL_WEEKLY_DROP_OPTIONAL_MICRO_ADJUST";
+    reasonText = "CA 仍在建議範圍內，但本週下降幅度已超過測量誤差，若希望止住下降趨勢，可小幅提高滴定量。";
+  } else if (caNormalHighRiseMicroAdjust) {
+    direction = -1;
+    action = "MICRO_ADJUST";
+    reasonCode = "CA_NORMAL_HIGH_RISING_OPTIONAL_MICRO_ADJUST";
+    reasonText = "CA 位於建議範圍上緣且較上次上升，非必要大改；可小幅降低滴定量，避免繼續往上累積。";
   } else if (statusCode === "NORMAL" && trendText === "下降" && currentValue <= lowerZone && !speed.tooFast) {
     direction = 1;
     action = "INCREASE_SMALL";
@@ -815,7 +964,11 @@ export function calculateDosingRecommendation({
     recoveryContext,
     tankVolumeLiters,
     observeContext,
-    khInRangeTrendMicroAdjust ? "KH_IN_RANGE_TREND_MICRO_ADJUST" : "",
+    khInRangeTrendMicroAdjust
+      ? "KH_IN_RANGE_TREND_MICRO_ADJUST"
+      : (caNormalDropMicroAdjust || caNormalHighRiseMicroAdjust)
+        ? "CA_OPTIONAL_MICRO_ADJUST"
+        : "",
   );
   const doseChangeMlPerDay = boundedChangeMlPerDay;
   if (doseChangeMlPerDay === 0) {

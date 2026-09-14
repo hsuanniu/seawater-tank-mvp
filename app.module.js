@@ -1,8 +1,8 @@
 import { nutrientFocusText, nutrientNotes } from "./components/aiExplanationModule.js";
 import { createAppVersionFooter } from "./components/appVersionFooter.js";
-import { actionText, changeText, confidenceText, dailyDeltaText, doseSuggestionText, formatDoseSentence, primaryFocus } from "./components/dashboardModule.js?v=20260706-dosing-manual-confirm";
+import { actionText, changeText, confidenceText, dailyDeltaText, doseSuggestionText, formatDoseSentence, primaryFocus } from "./components/dashboardModule.js?v=20260914-dosing-micro-adjust";
 import { createMeasurementSopController } from "./components/measurementSopComponent.js?v=20260617-sop-timer-fix";
-import { analyzeTank } from "./engines/analysisEngine.js?v=20260706-dosing-manual-confirm";
+import { analyzeTank } from "./engines/analysisEngine.js?v=20260914-dosing-micro-adjust";
 import { additiveLabel, normalizeAdditiveLog } from "./modules/additiveLogModule.js?v=20260520-additive-feeding-log2";
 import { analyzeBioLoadReferences, WEEKDAYS } from "./modules/bioLoadModule.js?v=20260520-additive-feeding-log2";
 import { APPLICABLE_DOSE_KEYS, createDoseApplicationEntry, getDoseStatus as readDoseStatus } from "./modules/dosingModule.js?v=20260521-stability-tests";
@@ -19,8 +19,9 @@ const CLOUD_CONFIG_KEY = "seawaterTankCloudConfig.v1";
 const CLOUD_TABLE = "user_app_state";
 const APP_VERSION_STORAGE_KEY = "seawaterTankAppVersion.v1";
 const FALLBACK_VERSION = {
-  version: "0.0.0",
-  current_version: "0.0.0",
+  version: "1.0.1",
+  current_version: "2026.09.14-dosing-micro-adjust",
+  build_time: "2026-09-14T11:17:41+08:00",
 };
 const DEBUG_MODE = false;
 let supabaseClient = null;
@@ -264,9 +265,13 @@ function reasonText(reasonCode) {
     KH_PRIORITY_LOW_HISTORY_INSUFFICIENT: "KH 優先處理",
     KH_PRIORITY_LOW_SMALL_INCREASE: "KH 優先處理",
     KH_LOW_UNSTABLE_VERIFY_FIRST: "KH 波動待確認",
+    KH_STABLE_LOW_OPTIONAL_MICRO_ADJUST: "KH 穩定偏低，可選微調",
     HIGH_REDUCE_ONLY: "高於目標，只允許保守降低",
     LOW_SMALL_INCREASE: "低於目標，只允許小幅增加",
     KH_IN_RANGE_TREND_MICRO_ADJUST: "目標內趨勢微調",
+    CA_NORMAL_WEEKLY_DROP_OPTIONAL_MICRO_ADJUST: "CA 週趨勢微調",
+    CA_NORMAL_HIGH_RISING_OPTIONAL_MICRO_ADJUST: "CA 上緣微調",
+    K_LOW_KPLUS_OFF_CONSIDER_ENABLE: "鉀(K) 偏低且 K+ 關閉",
     NORMAL_NEAR_LOW_TREND_DOWN: "接近下緣且下降",
     NORMAL_NEAR_HIGH_TREND_UP: "接近上緣且上升",
     NO_AUTO_DOSING_FOR_PARAMETER: "此項目不提供自動滴定建議",
@@ -289,6 +294,7 @@ function recommendationAction(row) {
   if (row.reasonCode === "ZERO_CURRENT_DOSE") return "請先輸入目前固定滴定量，建立基準後再讓系統計算微調。";
   if (row.autoCalculationPaused && row.recommendationMode === "CONSIDER_REDUCE") return "暫不自動計算。建議人工確認測量值與設備狀態後，再考慮降低或暫停滴定。";
   if (row.autoCalculationPaused) return "暫不自動計算。建議人工確認，並持續觀察下一次測量趨勢。";
+  if (row.reasonCode === "K_LOW_KPLUS_OFF_CONSIDER_ENABLE") return "鉀(K) 偏低且 K+ 目前關閉；可考慮開啟既有低量 K+，先跑一週後再測。";
   if (!row.canApplyRecommendation) return "目前資料不足，建議持續觀察與建立基準資料。";
   if (row.doseChange > 0) return `可小幅增加至 ${formatNumber(row.newDose)} ml/day，並於下次測量後再確認。`;
   if (row.doseChange < 0) return `可小幅降低至 ${formatNumber(row.newDose)} ml/day，並於下次測量後再確認。`;

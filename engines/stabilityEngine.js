@@ -94,6 +94,7 @@ export function buildStabilityContext({
   const fallbackValues = values.length ? values : [previousValue, currentValue].filter(Number.isFinite);
   let consecutiveOutOfRange = 0;
   let consecutiveLowCount = 0;
+  let consecutivePreferredLowCount = 0;
   let consecutiveDrops = 0;
   let consecutiveDropTotal = 0;
   let consecutiveDropDays = 0;
@@ -106,6 +107,13 @@ export function buildStabilityContext({
   for (let index = fallbackValues.length - 1; index >= 0; index -= 1) {
     if (rangeSide(fallbackValues[index], targetRange) !== "low") break;
     consecutiveLowCount += 1;
+  }
+
+  if (parameter === "kh") {
+    for (let index = fallbackValues.length - 1; index >= 0; index -= 1) {
+      if (!Number.isFinite(fallbackValues[index]) || fallbackValues[index] >= 8) break;
+      consecutivePreferredLowCount += 1;
+    }
   }
 
   const requiredSamples = REQUIRED_OUT_OF_RANGE_SAMPLES[parameter] ?? 2;
@@ -136,6 +144,7 @@ export function buildStabilityContext({
     inStabilityRange,
     consecutiveOutOfRange,
     consecutiveLowCount,
+    consecutivePreferredLowCount,
     consecutiveDrops,
     consecutiveDropTotal,
     consecutiveDropDays,

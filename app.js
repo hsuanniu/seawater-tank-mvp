@@ -1,5 +1,5 @@
 (function bootstrapModuleApp() {
-  const moduleSrc = "app.module.js?v=20260721-simplified-nav";
+  const moduleSrc = "app.module.js?v=20260914-dosing-micro-adjust";
   const alreadyLoaded = Array.from(document.scripts).some((script) => script.src.includes("app.module.js"));
   if (alreadyLoaded) return;
 

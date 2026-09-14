@@ -1,8 +1,8 @@
 {
   "app_name": "Seawater Tank",
   "package_name": "seawater-tank-mvp",
-  "version": "1.0.0",
-  "current_version": "1.0.0",
-  "build_date": "2026/07/28",
-  "build_time": "2026-07-28T08:46:11.042Z"
+  "version": "1.0.1",
+  "current_version": "2026.09.14-dosing-micro-adjust",
+  "build_date": "2026/09/14",
+  "build_time": "2026-09-14T11:17:41+08:00"
 }

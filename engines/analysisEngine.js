@@ -3,8 +3,8 @@ import { daysBetweenRecords, latestRecords } from "../modules/measurementModule.
 import { PARAMETERS } from "../modules/tankModule.js";
 import { toNumber } from "../services/formatService.js";
 import { buildRecoveryContext, recoveryContextForElement } from "./eventRecoveryEngine.js";
-import { buildObserveContext, buildStabilityContext } from "./stabilityEngine.js?v=20260706-dosing-manual-confirm";
-import { calculateDosingRecommendation, classify, trend } from "./safetyEngine.js?v=20260706-dosing-manual-confirm";
+import { buildObserveContext, buildStabilityContext } from "./stabilityEngine.js?v=20260914-dosing-micro-adjust";
+import { calculateDosingRecommendation, classify, trend } from "./safetyEngine.js?v=20260914-dosing-micro-adjust";
 
 export function analyzeTank({
   tank,

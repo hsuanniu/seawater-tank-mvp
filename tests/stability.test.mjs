@@ -249,7 +249,7 @@ test("KH low but already rising observes instead of increasing aggressively", ()
   assert.equal(result.doseChangeMlPerDay, 0);
 });
 
-test("KH low values wait for confirmed trend and observation period before increasing", () => {
+test("KH stable low values can enter optional micro adjustment", () => {
   const kh77 = calculateDosingRecommendation(dosingInput("kh", {
     currentValue: 7.7,
     previousValue: 7.7,
@@ -261,11 +261,11 @@ test("KH low values wait for confirmed trend and observation period before incre
     stabilityContext: { consecutiveLowCount: 2 },
   }));
 
-  assert.equal(kh77.reasonCode, "KH_LOW_STABLE_OBSERVE");
-  assert.equal(kh77.action, "OBSERVE");
-  assert.equal(kh77.doseChangeMlPerDay, 0);
-  assert.equal(kh77.suggestedDoseMlPerDay, 10.9);
-  assert.match(kh77.nextAdjustmentCondition, /連續第 3 次低於 8/);
+  assert.equal(kh77.reasonCode, "KH_STABLE_LOW_OPTIONAL_MICRO_ADJUST");
+  assert.equal(kh77.action, "MICRO_ADJUST");
+  assert.equal(kh77.doseChangeMlPerDay, 0.2);
+  assert.equal(kh77.suggestedDoseMlPerDay, 11.1);
+  assert.match(kh77.nextAdjustmentCondition, /不要連續加量/);
 });
 
 test("KH consecutive low count resets after returning to target range", () => {
@@ -382,15 +382,15 @@ test("KH consecutive low stability rules cover observation period, significant d
     daysSinceLastDoseAdjustment: 7,
   }));
 
-  assert.equal(stableTwo.suggestedDoseMlPerDay, 10.9);
-  assert.equal(stableTwo.doseChangeMlPerDay, 0);
-  assert.equal(stableTwo.action, "OBSERVE");
-  assert.equal(stableThreeAfterObservation.suggestedDoseMlPerDay, 11.2);
-  assert.equal(stableThreeAfterObservation.doseChangeMlPerDay, 0.3);
-  assert.equal(stableThreeAfterObservation.action, "INCREASE_SMALL");
-  assert.equal(firstLow.suggestedDoseMlPerDay, 10.9);
-  assert.equal(firstLow.doseChangeMlPerDay, 0);
-  assert.equal(firstLow.action, "OBSERVE");
+  assert.equal(stableTwo.suggestedDoseMlPerDay, 11.1);
+  assert.equal(stableTwo.doseChangeMlPerDay, 0.2);
+  assert.equal(stableTwo.action, "MICRO_ADJUST");
+  assert.equal(stableThreeAfterObservation.suggestedDoseMlPerDay, 11.3);
+  assert.equal(stableThreeAfterObservation.doseChangeMlPerDay, 0.4);
+  assert.equal(stableThreeAfterObservation.action, "MICRO_ADJUST");
+  assert.equal(firstLow.suggestedDoseMlPerDay, 11.1);
+  assert.equal(firstLow.doseChangeMlPerDay, 0.2);
+  assert.equal(firstLow.action, "MICRO_ADJUST");
   assert.equal(significantDrop.suggestedDoseMlPerDay, 11.2);
   assert.equal(significantDrop.doseChangeMlPerDay <= 0.3, true);
   assert.equal(significantDrop.action, "INCREASE_SMALL");
@@ -459,8 +459,8 @@ test("KH boundary cases stay conservative and avoid floating point dose artifact
   assert.equal(priorityLowInObservation.action, "KH_PRIORITY");
   assert.equal(priorityLowInObservation.suggestedDoseMlPerDay, 11.2);
   assert.equal(priorityLowInObservation.doseChangeMlPerDay, 0);
-  assert.equal(missingDoseAdjustmentDate.reasonCode, "KH_DOSE_HISTORY_INSUFFICIENT");
-  assert.equal(missingDoseAdjustmentDate.doseChangeMlPerDay, 0);
+  assert.equal(missingDoseAdjustmentDate.reasonCode, "KH_STABLE_LOW_OPTIONAL_MICRO_ADJUST");
+  assert.equal(missingDoseAdjustmentDate.doseChangeMlPerDay, 0.4);
 });
 
 test("MG recovery mode limits changes to one percent and stays below high confidence", () => {
@@ -500,7 +500,7 @@ test("NO3 recovering inside target range stays observe-only and avoids aggressiv
   assert.match(result.reasonText, /優先觀察/);
 });
 
-test("Stable Lock keeps the real-world stable case unchanged", () => {
+test("Stable Lock keeps balanced values unchanged but allows optional KH stable-low micro adjustment", () => {
   const records = [
     completeMeasurement({
       id: "stable-before",
@@ -551,9 +551,9 @@ test("Stable Lock keeps the real-world stable case unchanged", () => {
     assert.equal(row.canApplyRecommendation, false, parameter);
   }
 
-  assert.equal(analysis.rows.find((row) => row.key === "kh").reasonCode, "KH_IN_TARGET_MAINTAIN");
-  assert.equal(analysis.rows.find((row) => row.key === "kh").doseChange, 0);
-  assert.equal(analysis.rows.find((row) => row.key === "kh").newDose, 10.3);
+  assert.equal(analysis.rows.find((row) => row.key === "kh").reasonCode, "KH_STABLE_LOW_OPTIONAL_MICRO_ADJUST");
+  assert.equal(analysis.rows.find((row) => row.key === "kh").doseChange, 0.2);
+  assert.equal(analysis.rows.find((row) => row.key === "kh").newDose, 10.5);
   assert.equal(analysis.rows.find((row) => row.key === "ca").newDose, 4);
   assert.equal(analysis.rows.find((row) => row.key === "mg").newDose, 0.8);
   assert.equal(analysis.rows.find((row) => row.key === "no3").reasonCode, "STABLE_IN_RANGE");
@@ -561,7 +561,7 @@ test("Stable Lock keeps the real-world stable case unchanged", () => {
   assert.equal(analysis.rows.find((row) => row.key === "k").reasonCode, "VALUE_CARRIED_FORWARD");
 });
 
-test("KH inside target range maintains even when the weekly trend is downward", () => {
+test("KH inside target range micro-adjusts when the weekly trend is clearly downward", () => {
   const tank = {
     ...DEFAULT_TANK,
     volume: 200,
@@ -580,15 +580,15 @@ test("KH inside target range maintains even when the weekly trend is downward", 
   });
   const kh = analysis.rows.find((row) => row.key === "kh");
 
-  assert.equal(kh.reasonCode, "KH_IN_TARGET_MAINTAIN");
-  assert.equal(kh.recommendationMode, "MAINTAIN");
-  assert.equal(kh.doseChange, 0);
-  assert.equal(kh.newDose, 10.2);
-  assert.equal(kh.canApplyRecommendation, false);
-  assert.match(kh.recommendationReason, /位於目標區間/);
+  assert.equal(kh.reasonCode, "KH_IN_RANGE_TREND_MICRO_ADJUST");
+  assert.equal(kh.recommendationMode, "MICRO_ADJUST");
+  assert.equal(kh.doseChange, 0.5);
+  assert.equal(kh.newDose, 10.7);
+  assert.equal(kh.canApplyRecommendation, true);
+  assert.match(kh.recommendationReason, /目標範圍/);
 });
 
-test("KH remains unchanged after two consecutive drops inside target range", () => {
+test("KH micro-adjusts after two consecutive drops inside target range", () => {
   const tank = {
     ...DEFAULT_TANK,
     volume: 200,
@@ -608,12 +608,12 @@ test("KH remains unchanged after two consecutive drops inside target range", () 
   });
   const kh = analysis.rows.find((row) => row.key === "kh");
 
-  assert.equal(kh.reasonCode, "KH_IN_TARGET_MAINTAIN");
-  assert.equal(kh.doseChange, 0);
-  assert.equal(kh.newDose, 10.2);
+  assert.equal(kh.reasonCode, "KH_IN_RANGE_TREND_MICRO_ADJUST");
+  assert.equal(kh.doseChange, 0.5);
+  assert.equal(kh.newDose, 10.7);
 });
 
-test("KH in-range trend keeps nano tanks unchanged", () => {
+test("KH in-range trend keeps nano tanks extra conservative", () => {
   const tank = {
     ...DEFAULT_TANK,
     volume: 65,
@@ -632,9 +632,9 @@ test("KH in-range trend keeps nano tanks unchanged", () => {
   });
   const kh = analysis.rows.find((row) => row.key === "kh");
 
-  assert.equal(kh.reasonCode, "KH_IN_TARGET_MAINTAIN");
-  assert.equal(kh.doseChange, 0);
-  assert.equal(kh.newDose, 10.2);
+  assert.equal(kh.reasonCode, "KH_IN_RANGE_TREND_MICRO_ADJUST");
+  assert.equal(kh.doseChange, 0.2);
+  assert.equal(kh.newDose, 10.4);
 });
 
 test("KH inside target range maintains when movement is small and not a confirmed trend", () => {
@@ -681,8 +681,8 @@ test("Stable Lock also protects stable values when an older saved target range r
   });
 
   const kh = analysis.rows.find((item) => item.key === "kh");
-  assert.equal(kh.reasonCode, "KH_LOW_STABLE_OBSERVE");
-  assert.equal(kh.doseChange, 0);
+  assert.equal(kh.reasonCode, "KH_STABLE_LOW_OPTIONAL_MICRO_ADJUST");
+  assert.equal(kh.doseChange, 0.2);
 
   for (const parameter of ["ca", "mg"]) {
     const row = analysis.rows.find((item) => item.key === parameter);
@@ -720,6 +720,62 @@ test("CA high readings avoid automatic dose changes and escalate by trend", () =
   assert.equal(confirmedHigh.reasonCode, "CONSECUTIVE_HIGH_RISING_MANUAL_CONFIRM");
   assert.equal(confirmedHigh.doseChange, 0);
   assert.equal(confirmedHigh.autoCalculationPaused, true);
+});
+
+test("Personal weekly reef case suggests optional KH CA micro adjustments and K+ reminder", () => {
+  const firstWeek = analyzeTank({
+    tank: { ...DEFAULT_TANK, volume: 75 },
+    records: [
+      completeMeasurement({ id: "week-0", date: "2026-09-07", kh: 7.7, no3: 0.2, po4: 0.03, mg: 1350, ca: 450, k: 400 }),
+      completeMeasurement({ id: "week-1", date: "2026-09-14", kh: 7.7, no3: 0.2, po4: 0.03, mg: 1350, ca: 435, k: 400, measuredFields: { k: false } }),
+    ],
+    dosing: {
+      kh: 11.5,
+      ca: 4,
+      mg: 0.4,
+      aplus: 0.4,
+      kplus: 0.2,
+      status: { kplus: { enabled: false, pausedDays: 0 } },
+    },
+  });
+  const khFirst = firstWeek.rows.find((row) => row.key === "kh");
+  const caFirst = firstWeek.rows.find((row) => row.key === "ca");
+
+  assert.equal(khFirst.reasonCode, "KH_STABLE_LOW_OPTIONAL_MICRO_ADJUST");
+  assert.equal(khFirst.newDose, 11.7);
+  assert.equal(khFirst.doseChange, 0.2);
+  assert.equal(caFirst.reasonCode, "CA_NORMAL_WEEKLY_DROP_OPTIONAL_MICRO_ADJUST");
+  assert.equal(caFirst.newDose, 4.2);
+  assert.equal(caFirst.doseChange, 0.2);
+
+  const secondWeek = analyzeTank({
+    tank: { ...DEFAULT_TANK, volume: 75 },
+    records: [
+      completeMeasurement({ id: "week-0", date: "2026-09-07", kh: 7.7, no3: 0.2, po4: 0.03, mg: 1350, ca: 450, k: 400 }),
+      completeMeasurement({ id: "week-1", date: "2026-09-14", kh: 7.7, no3: 0.2, po4: 0.03, mg: 1350, ca: 435 }),
+      completeMeasurement({ id: "week-2", date: "2026-09-21", kh: 7.7, no3: 1, po4: 0.1, mg: 1350, ca: 440, k: 370 }),
+    ],
+    dosing: {
+      kh: 11.7,
+      ca: 4.2,
+      mg: 0.4,
+      aplus: 0.4,
+      kplus: 0.2,
+      status: { kplus: { enabled: false, pausedDays: 0 } },
+    },
+  });
+  const khSecond = secondWeek.rows.find((row) => row.key === "kh");
+  const caSecond = secondWeek.rows.find((row) => row.key === "ca");
+  const kSecond = secondWeek.rows.find((row) => row.key === "k");
+
+  assert.equal(khSecond.reasonCode, "KH_STABLE_LOW_OPTIONAL_MICRO_ADJUST");
+  assert.equal(khSecond.newDose, 12.1);
+  assert.equal(khSecond.doseChange, 0.4);
+  assert.equal(caSecond.reasonCode, "CA_NORMAL_HIGH_RISING_OPTIONAL_MICRO_ADJUST");
+  assert.equal(caSecond.newDose, 4);
+  assert.equal(caSecond.doseChange, -0.2);
+  assert.equal(kSecond.reasonCode, "K_LOW_KPLUS_OFF_CONSIDER_ENABLE");
+  assert.equal(kSecond.canApplyRecommendation, false);
 });
 
 test("KH low analysis does not auto-increase without a confirmed dose observation age", () => {
