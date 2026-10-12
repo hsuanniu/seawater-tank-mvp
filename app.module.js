@@ -22,8 +22,8 @@ const STORAGE_KEY = "seawaterTankMvp.v4";
 const CLOUD_CONFIG_KEY = "seawaterTankCloudConfig.v1";
 const APP_VERSION_STORAGE_KEY = "seawaterTankAppVersion.v1";
 const FALLBACK_VERSION = {
-  version: "1.0.3",
-  current_version: "1.0.3",
+  version: "1.0.4",
+  current_version: "1.0.4",
   build_time: "2026-10-12T00:00:00+08:00",
 };
 const DEBUG_MODE = false;
@@ -90,8 +90,8 @@ const CloudSync = createCloudSyncController({
     } finally { suppressCloudSave = false; }
   },
   saveBackup: (snapshot) => saveJson("seawaterTankCloudSafetyBackup.v1", snapshot),
-  loadMetadata: (ownerKey) => loadJson(`seawaterTankCloudSyncMeta.v1:${ownerKey}`),
-  saveMetadata: (ownerKey, metadata) => saveJson(`seawaterTankCloudSyncMeta.v1:${ownerKey}`, metadata),
+  loadMetadata: () => loadJson("seawaterTankCloudSyncMeta.v2"),
+  saveMetadata: (metadata) => saveJson("seawaterTankCloudSyncMeta.v2", metadata),
   onChange: (status) => {
     renderCloudStatus();
     const failure = ["error", "conflict"].includes(status.phase) ? status.message : "";

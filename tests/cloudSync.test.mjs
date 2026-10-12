@@ -39,13 +39,13 @@ class MemoryRepository {
 function device(initial = fixture(), repository = new MemoryRepository(), metadata = new Map()) {
   let local = structuredClone(initial);
   const backups = [];
-  const options = { failBackup: false, failMetadata: false, pendingDraft: false };
+  const options = { failBackup: false, failMetadata: false, pendingDraft: false, disconnectAfterHydrate: false };
   const controller = createCloudSyncController({
     getLocalState: () => local,
-    replaceLocalState: (data) => { if (options.pendingDraft) throw new Error("LOCAL_DRAFT_PENDING"); local = structuredClone(data); controller.markLocalChange(); },
+    replaceLocalState: (data) => { if (options.pendingDraft) throw new Error("LOCAL_DRAFT_PENDING"); local = structuredClone(data); controller.markLocalChange(); if (options.disconnectAfterHydrate) controller.disconnect(); },
     saveBackup: (data) => { if (options.failBackup) return false; backups.push(structuredClone(data)); return true; },
-    loadMetadata: (key) => metadata.get(key),
-    saveMetadata: (key, value) => { if (options.failMetadata) return false; metadata.set(key, value); return true; },
+    loadMetadata: () => metadata.get("current"),
+    saveMetadata: (value) => { if (options.failMetadata) return false; metadata.set("current", value); return true; },
   });
   return {
     controller, repository, metadata, backups, options,
@@ -198,6 +198,44 @@ test("A raced first import never replaces the cloud initialized by another devic
   assert.equal(await d.controller.initialize(() => true), false);
   assert.equal(d.controller.getStatus().phase, "conflict");
   assert.equal(d.repository.row.data.tanks[0].records[0].kh, 8.6);
+});
+
+test("Switching accounts never publishes the previous account's local data", async () => {
+  const phone = device(fixture(8.2));
+  const firstRepository = phone.repository;
+  const secondRepository = new MemoryRepository();
+  await secondRepository.initialize(fixture(8.7));
+  await phone.controller.connect({ ownerKey: "project::A", repository: firstRepository });
+  await phone.controller.initialize(() => true);
+  await phone.controller.connect({ ownerKey: "project::B", repository: secondRepository });
+  assert.equal(phone.controller.getStatus().phase, "awaiting_load");
+  await phone.controller.loadCloud(() => true);
+  assert.equal(phone.local.tanks[0].records[0].kh, 8.7);
+  await phone.controller.connect({ ownerKey: "project::A", repository: firstRepository });
+  assert.equal(phone.controller.getStatus().phase, "awaiting_load");
+  assert.equal(phone.controller.getStatus().canPublish, false);
+  assert.equal(await phone.controller.sync(), false);
+  assert.equal(firstRepository.row.data.tanks[0].records[0].kh, 8.2);
+  assert.equal(firstRepository.saves, 0);
+});
+
+test("Interrupted account hydration cannot mislabel the next account's local data", async () => {
+  const phone = device(fixture(8.2));
+  const firstRepository = phone.repository;
+  const secondRepository = new MemoryRepository();
+  await secondRepository.initialize(fixture(8.7));
+  await phone.controller.connect({ ownerKey: "project::A", repository: firstRepository });
+  await phone.controller.initialize(() => true);
+  await phone.controller.connect({ ownerKey: "project::B", repository: secondRepository });
+  phone.options.disconnectAfterHydrate = true;
+  await phone.controller.loadCloud(() => true);
+  assert.equal(phone.controller.getStatus().phase, "signed_out");
+  assert.equal(phone.metadata.get("current").revision, null);
+  phone.options.disconnectAfterHydrate = false;
+  await phone.controller.connect({ ownerKey: "project::A", repository: firstRepository });
+  assert.equal(phone.controller.getStatus().phase, "awaiting_load");
+  assert.equal(phone.controller.getStatus().canPublish, false);
+  assert.equal(firstRepository.row.data.tanks[0].records[0].kh, 8.2);
 });
 
 test("Backup and metadata failures stop hydration or publishing", async () => {

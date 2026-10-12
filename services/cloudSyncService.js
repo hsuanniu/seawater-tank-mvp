@@ -84,9 +84,9 @@ export function createCloudSyncController({ getLocalState, replaceLocalState, sa
 
   async function acceptSnapshot(snapshot, submitted, submittedChanges, key, ticket) {
     checkSnapshot(snapshot);
-    const metadata = { revision: snapshot.revision, digest: await digest(submitted), updatedAt: snapshot.updated_at };
+    const metadata = { ownerKey: key, revision: snapshot.revision, digest: await digest(submitted), updatedAt: snapshot.updated_at };
     if (generation !== ticket) return false;
-    if (!saveMetadata(key, metadata)) throw new Error("LOCAL_METADATA_FAILED");
+    if (!saveMetadata(metadata)) throw new Error("LOCAL_METADATA_FAILED");
     syncedChanges = submittedChanges;
     update({ phase: "connected", revision: snapshot.revision, remote: cloudDataSummary(snapshot.data), lastSyncedAt: snapshot.updated_at, message: "雲端資料已啟用" });
     return true;
@@ -97,6 +97,8 @@ export function createCloudSyncController({ getLocalState, replaceLocalState, sa
     const before = structuredClone(getLocalState());
     if (before.tanks.length && !saveBackup(before)) throw new Error("LOCAL_BACKUP_FAILED");
     if (generation !== expectedGeneration) return false;
+    // Mark ownership uncertain before replacing data; logout can interrupt the later digest.
+    if (!saveMetadata({ ownerKey: key, revision: null, digest: "", updatedAt: null })) throw new Error("LOCAL_METADATA_FAILED");
     hydrating = true;
     try { replaceLocalState(snapshot.data); } finally { hydrating = false; }
     return acceptSnapshot(snapshot, getLocalState(), changes, key, expectedGeneration);
@@ -117,8 +119,8 @@ export function createCloudSyncController({ getLocalState, replaceLocalState, sa
       }
       checkSnapshot(snapshot);
       update({ remote: cloudDataSummary(snapshot.data), lastSyncedAt: snapshot.updated_at });
-      const savedMetadata = loadMetadata(ownerKey);
-      const metadata = Number.isInteger(savedMetadata?.revision) && /^[a-f0-9]{64}$/.test(savedMetadata?.digest || "") ? savedMetadata : null;
+      const savedMetadata = loadMetadata();
+      const metadata = savedMetadata?.ownerKey === ownerKey && Number.isInteger(savedMetadata?.revision) && /^[a-f0-9]{64}$/.test(savedMetadata?.digest || "") ? savedMetadata : null;
       const localDigest = await digest(getLocalState());
       if (ticket !== generation) return false;
       const localChangedWhileReading = localDigest !== localBeforeRead;
