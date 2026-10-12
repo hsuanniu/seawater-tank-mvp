@@ -875,15 +875,17 @@ test("Retention cleanup moves records older than six months into archive", () =>
 test("Retention cleanup keeps at most fifty active records and archives the older overflow", () => {
   useStorage();
   const store = createStore("retention-fifty");
+  const today = new Date();
+  const recentDate = (daysAgo) => new Date(Date.UTC(today.getFullYear(), today.getMonth(), today.getDate() - daysAgo)).toISOString().slice(0, 10);
   for (let index = 1; index <= 55; index += 1) {
-    const date = new Date(Date.UTC(2026, 3, index)).toISOString().slice(0, 10);
+    const date = recentDate(55 - index);
     store.upsertMeasurementByDate(completeMeasurement({ date, kh: 8 + index / 100 }));
   }
 
   assert.equal(store.getMeasurements().length, 50);
   assert.equal(store.getArchivedMeasurements().length, 5);
-  assert.equal(store.getMeasurements()[0].date, "2026-04-06");
-  assert.equal(store.getArchivedMeasurements()[0].date, "2026-04-01");
+  assert.equal(store.getMeasurements()[0].date, recentDate(49));
+  assert.equal(store.getArchivedMeasurements()[0].date, recentDate(54));
 });
 
 test("Archived records do not participate in dosing analysis", () => {

@@ -77,6 +77,7 @@
             </div>
             <div class="button-row settings-shortcuts">
               <button class="ghost-button" type="button" data-goto="bio-load">生物負載</button>
+              <button class="ghost-button" type="button" data-goto="cloud">GPT 連接與同步</button>
             </div>
           </article>
           <form id="tankForm" class="panel form-panel">
@@ -472,7 +473,7 @@
         <section id="cloud" class="page">
           <article class="panel form-panel">
             <div class="panel-heading">
-              <h3>雲端同步</h3>
+              <h3>GPT 連接與同步</h3>
               <span class="badge" id="cloudStatusBadge">未連線</span>
             </div>
             <div class="notice compact">
@@ -504,6 +505,14 @@
               <button class="ghost-button" id="downloadCloudBtn" type="button">從雲端下載</button>
             </div>
             <div id="cloudSummary" class="summary-list"></div>
+            <div id="gptSyncStatus" class="notice compact" role="status" aria-live="polite">尚未同步，GPT 暫時讀不到這台手機的紀錄。</div>
+            <details>
+              <summary>GPT 連接資訊</summary>
+              <div class="form-grid">
+                <label>雲端使用者 ID<input id="gptUserId" type="text" readonly /></label>
+                <label>GPT Action 設定網址<input id="gptSchemaUrl" type="url" readonly /></label>
+              </div>
+            </details>
           </article>
         </section>
       </main>
@@ -520,7 +529,7 @@
     </nav>
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script type="module" src="app.module.js?v=20260914-dosing-micro-adjust"></script>
-    <script defer src="app.js?v=20260914-dosing-micro-adjust"></script>
+    <script type="module" src="app.module.js?v=20261008-gpt-readonly"></script>
+    <script defer src="app.js?v=20261008-gpt-readonly"></script>
   </body>
 </html>

@@ -1,4 +1,4 @@
-const CACHE_NAME = "seawater-tank-mvp-v40";
+const CACHE_NAME = "seawater-tank-mvp-v41";
 const APP_SHELL = [
   "./",
   "index.html",
@@ -58,6 +58,7 @@ self.addEventListener("message", (event) => {
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
   const url = new URL(event.request.url);
+  if (url.origin !== self.location.origin) return;
   if (url.pathname.endsWith("/version.json")) {
     event.respondWith(fetch(event.request, { cache: "no-store" }));
     return;

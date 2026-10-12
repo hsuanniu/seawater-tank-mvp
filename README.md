@@ -19,6 +19,7 @@
 - PWA，可從手機瀏覽器加入主畫面
 - Supabase 登入與雲端同步
 - localStorage 單機儲存
+- GPT 唯讀連接程式與設定指引（須先設定 Supabase、部署 Edge Function，並在專用 GPT 匯入 Action 才能使用）
 
 ## 本機使用
 
@@ -53,6 +54,8 @@ http://localhost:4179
 部署完成後，Render 會提供一個 `onrender.com` 網址。
 
 ## Supabase 雲端同步
+
+若要像遊戲庫一樣讓 GPT 直接讀取資料，請依照 [GPT 連接設定](GPT_CONNECTION.md)。首頁保持原本高頻入口，連接設定位於「設定 → GPT 連接與同步」。
 
 雲端同步會把整份 App 資料存成同一筆使用者資料，方便手機與電腦同步。
 
