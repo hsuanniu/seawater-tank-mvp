@@ -7,7 +7,7 @@
     <meta name="theme-color" content="#e9f8fb" />
     <link rel="manifest" href="manifest.webmanifest" />
     <link rel="apple-touch-icon" href="icons/icon-192.svg" />
-    <link rel="stylesheet" href="styles.css?v=20260914-dosing-micro-adjust" />
+    <link rel="stylesheet" href="styles.css?v=20261012-simple-cloud-sync" />
   </head>
   <body>
     <div class="app-shell">
@@ -77,7 +77,7 @@
             </div>
             <div class="button-row settings-shortcuts">
               <button class="ghost-button" type="button" data-goto="bio-load">生物負載</button>
-              <button class="ghost-button" type="button" data-goto="cloud">GPT 連接與同步</button>
+              <button class="ghost-button" type="button" data-goto="cloud">雲端資料同步</button>
             </div>
           </article>
           <form id="tankForm" class="panel form-panel">
@@ -471,49 +471,42 @@
         </section>
 
         <section id="cloud" class="page">
-          <article class="panel form-panel">
-            <div class="panel-heading">
-              <h3>GPT 連接與同步</h3>
-              <span class="badge" id="cloudStatusBadge">未連線</span>
+          <div class="cloud-sync-page">
+            <header class="cloud-sync-heading">
+              <div><p class="eyebrow">REEF CLOUD</p><h3>雲端資料同步</h3></div>
+              <span class="badge muted" id="cloudStatusBadge">確認中</span>
+            </header>
+            <p id="cloudAccount" class="cloud-account" hidden></p>
+            <div class="cloud-sync-metrics" aria-label="本機與雲端紀錄數量">
+              <article class="cloud-count-card"><span>這台裝置</span><strong id="cloudLocalCount">0</strong><span>筆水質紀錄</span><small id="cloudLocalTanks">0 個魚缸</small></article>
+              <article class="cloud-count-card"><span>雲端資料庫</span><strong id="cloudRemoteCount">—</strong><span>筆水質紀錄</span><small id="cloudRemoteTanks">尚未連線</small></article>
             </div>
-            <div class="notice compact">
-              雲端同步使用 Supabase。請先建立 Supabase 專案，執行本專案提供的 SQL，再填入 Project URL 與 anon key。
-            </div>
-            <div class="form-grid">
-              <label>Supabase Project URL<input id="supabaseUrl" type="url" placeholder="https://xxxx.supabase.co" /></label>
-              <label>Supabase anon key<input id="supabaseAnonKey" type="password" placeholder="sb_publishable_..." /></label>
-            </div>
-            <div class="button-row">
-              <button class="ghost-button" id="saveCloudConfigBtn" type="button">儲存雲端設定</button>
-              <button class="ghost-button" id="clearCloudConfigBtn" type="button">清除雲端設定</button>
-            </div>
-
-            <div class="section-label">登入</div>
-            <div class="form-grid">
-              <label>Email<input id="authEmail" type="email" autocomplete="email" /></label>
-              <label>密碼<input id="authPassword" type="password" autocomplete="current-password" /></label>
-            </div>
-            <div class="button-row">
-              <button class="primary-button" id="signInBtn" type="button">登入</button>
+            <p id="cloudSetupNotice" class="notice compact" role="status">正在確認雲端連線</p>
+            <form id="cloudAuthForm" class="cloud-auth-form" hidden>
+              <div class="form-grid">
+                <label>Email<input id="authEmail" type="email" autocomplete="email" required /></label>
+                <label>密碼<input id="authPassword" type="password" autocomplete="current-password" required /></label>
+              </div>
+              <button class="primary-button" id="signInBtn" type="submit">登入雲端</button>
               <button class="ghost-button" id="signUpBtn" type="button">建立帳號</button>
-              <button class="ghost-button" id="signOutBtn" type="button">登出</button>
-            </div>
-
-            <div class="section-label">同步操作</div>
-            <div class="button-row">
-              <button class="primary-button" id="uploadCloudBtn" type="button">上傳到雲端</button>
-              <button class="ghost-button" id="downloadCloudBtn" type="button">從雲端下載</button>
-            </div>
-            <div id="cloudSummary" class="summary-list"></div>
-            <div id="gptSyncStatus" class="notice compact" role="status" aria-live="polite">尚未同步，GPT 暫時讀不到這台手機的紀錄。</div>
-            <details>
+            </form>
+            <div id="cloudImportActions" class="cloud-sync-actions" hidden><button class="primary-button" id="uploadCloudBtn" type="button">首次匯入紀錄</button></div>
+            <div id="cloudLoadActions" class="cloud-sync-actions" hidden><button class="primary-button" id="downloadCloudBtn" type="button">載入雲端紀錄</button></div>
+            <div id="cloudConnectedActions" class="cloud-sync-actions" hidden><button class="ghost-button" id="cloudSyncNowBtn" type="button">重新同步</button></div>
+            <p id="gptSyncStatus" class="cloud-sync-message" role="status" aria-live="polite">本機紀錄已保留</p>
+            <p id="cloudLastSynced" class="cloud-sync-time">尚未完成同步</p>
+            <p id="cloudImportProtection" class="cloud-sync-protection" hidden>首次匯入已完成。為保護現有紀錄，不再提供本機重新匯入。</p>
+            <details id="cloudBackupDetails" class="cloud-backup-details" hidden><summary>本機安全備份</summary><button class="ghost-button" id="cloudDownloadBackupBtn" type="button">下載同步前備份</button></details>
+            <button class="ghost-button cloud-signout" id="signOutBtn" type="button" hidden>登出雲端</button>
+            <details id="gptLinkDetails" class="cloud-gpt-details" hidden>
               <summary>GPT 連接資訊</summary>
               <div class="form-grid">
                 <label>雲端使用者 ID<input id="gptUserId" type="text" readonly /></label>
                 <label>GPT Action 設定網址<input id="gptSchemaUrl" type="url" readonly /></label>
               </div>
             </details>
-          </article>
+            <button class="ghost-button" type="button" data-goto="tank">回到設定</button>
+          </div>
         </section>
       </main>
     </div>
@@ -529,7 +522,7 @@
     </nav>
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script type="module" src="app.module.js?v=20261008-gpt-readonly"></script>
-    <script defer src="app.js?v=20261008-gpt-readonly"></script>
+    <script type="module" src="app.module.js?v=20261012-simple-cloud-sync"></script>
+    <script defer src="app.js?v=20261012-simple-cloud-sync"></script>
   </body>
 </html>

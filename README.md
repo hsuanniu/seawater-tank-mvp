@@ -48,27 +48,25 @@ http://localhost:4179
 5. 連接你的 GitHub repository。
 6. 如果 Render 讀到 `render.yaml`，可直接依設定部署。
 7. 若手動設定：
-   - Build Command：留空
+   - Build Command：`npm run build`
    - Publish Directory：`.`
 
 部署完成後，Render 會提供一個 `onrender.com` 網址。
 
 ## Supabase 雲端同步
 
-若要像遊戲庫一樣讓 GPT 直接讀取資料，請依照 [GPT 連接設定](GPT_CONNECTION.md)。首頁保持原本高頻入口，連接設定位於「設定 → GPT 連接與同步」。
+若要像遊戲庫一樣讓 GPT 直接讀取資料，請依照 [雲端與 GPT 連接設定](GPT_CONNECTION.md)。入口位於「設定 → 雲端資料同步」。
 
-雲端同步會把整份 App 資料存成同一筆使用者資料，方便手機與電腦同步。
+雲端同步保留同一份 TankStore 快照，按帳號隔離；部署時只設定一次公開連線資訊，手機不再要求填網址或金鑰。
 
 1. 建立 Supabase 專案。
 2. 到 SQL Editor 執行 `supabase-schema.sql`。
-3. 到 App 的「雲端同步」頁面填入：
-   - Supabase Project URL
-   - Supabase anon key
-4. 建立帳號或登入。
-5. 第一次同步時，先在主要裝置按「上傳到雲端」。
-6. 其他裝置登入後按「從雲端下載」。
+3. Render Environment 設定 `REEF_SUPABASE_URL`、`REEF_SUPABASE_PUBLISHABLE_KEY`，Build Command 使用 `npm run build`，重新部署。
+4. 在 App 的「雲端資料同步」登入或建立帳號。
+5. 使用原本保存紀錄的手機，確認數量後按「首次匯入」。雲端已有資料時不允許再次匯入。
+6. 其他裝置登入後載入雲端；載入前會保留本機安全備份。
 
-之後登入狀態下，本機資料儲存後會自動排程上傳；你也可以手動上傳或下載。
+啟用後，本機儲存會自動同步。更新會檢查雲端版本，防止舊裝置覆蓋新紀錄；離線修改仍保留在本機。
 
 ## 注意事項
 

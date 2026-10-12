@@ -2,5 +2,9 @@ services:
   - type: web
     name: seawater-tank-mvp
     runtime: static
+    buildCommand: npm run build
     staticPublishPath: .
+    envVars:
+      - key: NODE_VERSION
+        value: 24
     pullRequestPreviewsEnabled: false

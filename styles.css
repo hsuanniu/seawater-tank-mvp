@@ -1700,6 +1700,135 @@ button:disabled {
   font-size: 13px;
 }
 
+.cloud-sync-page {
+  display: grid;
+  gap: 18px;
+  width: 100%;
+  max-width: 560px;
+  margin-inline: auto;
+  padding: 8px 0 24px;
+}
+
+.cloud-sync-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.cloud-sync-heading h3 {
+  margin: 4px 0 0;
+  color: var(--navy);
+  font-size: 22px;
+}
+
+.cloud-sync-heading .badge {
+  flex-shrink: 0;
+}
+
+.cloud-account,
+.cloud-sync-time,
+.cloud-sync-protection {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.cloud-sync-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.cloud-count-card {
+  display: grid;
+  gap: 6px;
+  padding: 20px 16px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel);
+  box-shadow: var(--card-shadow);
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.cloud-count-card strong {
+  color: var(--navy);
+  font-size: 32px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+
+.cloud-count-card small {
+  margin-top: 6px;
+  color: var(--blue-strong);
+  font-size: 14px;
+}
+
+.cloud-auth-form,
+.cloud-sync-actions {
+  display: grid;
+  gap: 12px;
+}
+
+.cloud-auth-form .form-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.cloud-sync-page input {
+  min-height: 52px;
+  font-size: 16px;
+}
+
+.cloud-sync-page button {
+  width: 100%;
+  min-height: 48px;
+}
+
+.cloud-sync-message {
+  margin: 0;
+  padding: 14px 16px;
+  border-left: 3px solid var(--blue);
+  color: var(--ink);
+  background: var(--blue-soft);
+  font-size: 15px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.cloud-sync-message.is-connected {
+  border-color: var(--green);
+  color: #146947;
+  background: var(--green-soft);
+}
+
+.cloud-sync-message.is-warning,
+.cloud-warning {
+  color: #89520c;
+  background: var(--yellow-soft);
+  border-color: var(--yellow);
+}
+
+.cloud-connected {
+  color: #146947;
+  background: var(--green-soft);
+}
+
+.cloud-sync-page summary {
+  min-height: 44px;
+  padding-block: 12px;
+  color: var(--blue-strong);
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.cloud-sync-page [hidden] {
+  display: none !important;
+}
+
 .backup-notice {
   border-left: 4px solid var(--blue);
 }

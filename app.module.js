@@ -1,5 +1,6 @@
 import { nutrientFocusText, nutrientNotes } from "./components/aiExplanationModule.js";
 import { createAppVersionFooter } from "./components/appVersionFooter.js";
+import { renderCloudSyncView } from "./components/cloudSyncComponent.js";
 import { actionText, changeText, confidenceText, dailyDeltaText, doseSuggestionText, formatDoseSentence, primaryFocus } from "./components/dashboardModule.js?v=20260914-dosing-micro-adjust";
 import { createMeasurementSopController } from "./components/measurementSopComponent.js?v=20260617-sop-timer-fix";
 import { analyzeTank } from "./engines/analysisEngine.js?v=20260914-dosing-micro-adjust";
@@ -13,22 +14,27 @@ import { DEFAULT_TANK, PARAMETERS, parseTargetExpression } from "./modules/tankM
 import { escapeHtml, formatNumber, targetToText, toNumber } from "./services/formatService.js";
 import { restoreBackupText } from "./services/backupService.js";
 import { createTankStore } from "./services/tankStore.js";
+import { loadDeploymentCloudConfig } from "./services/cloudConfigService.js";
+import { createCloudSyncController, createSupabaseCloudRepository } from "./services/cloudSyncService.js";
+import { loadJson, saveJson } from "./services/storageService.js";
 
 const STORAGE_KEY = "seawaterTankMvp.v4";
 const CLOUD_CONFIG_KEY = "seawaterTankCloudConfig.v1";
-const CLOUD_TABLE = "user_app_state";
 const APP_VERSION_STORAGE_KEY = "seawaterTankAppVersion.v1";
 const FALLBACK_VERSION = {
-  version: "1.0.2",
-  current_version: "1.0.2",
-  build_time: "2026-10-08T00:00:00+08:00",
+  version: "1.0.3",
+  current_version: "1.0.3",
+  build_time: "2026-10-12T00:00:00+08:00",
 };
 const DEBUG_MODE = false;
 let supabaseClient = null;
 let cloudSession = null;
 let cloudSaveTimer = null;
-let cloudUploadQueue = Promise.resolve();
-let cloudSyncStatus = { message: "尚未同步，GPT 暫時讀不到這台手機的紀錄。", failed: false };
+let cloudConfiguration = null;
+let cloudSetupChecked = false;
+let cloudConnectionError = "";
+let cloudAuthBusy = false;
+let previousCloudFailure = "";
 let suppressCloudSave = false;
 let dosingAutoSaveTimer = null;
 let feedbackTimer = null;
@@ -42,7 +48,11 @@ const AppVersionFooter = createAppVersionFooter({
 
 const TankStore = createTankStore({
   storageKey: STORAGE_KEY,
-  onPersist: () => scheduleCloudSave(),
+  onPersist: () => {
+    if (suppressCloudSave) return;
+    CloudSync.markLocalChange();
+    scheduleCloudSave();
+  },
   onPersistError: () => showToast("本機儲存失敗，請先備份資料並確認瀏覽器儲存空間。"),
   onChange: ({ forms = false, cloud = false, partial = false, statusPrefix = "" } = {}) => {
     if (partial) {
@@ -57,6 +67,38 @@ const TankStore = createTankStore({
     renderAll({ forms, cloud });
   },
   onDosingDebug: debugDosingSync,
+});
+
+const CloudSync = createCloudSyncController({
+  getLocalState: () => TankStore.serializeState(),
+  replaceLocalState: (snapshot) => {
+    const draft = formData(document.querySelector("#waterForm"));
+    const hasMeasurementDraft = Object.entries(draft).some(([key, value]) =>
+      key === "date" ? value && value !== todayText() : String(value || "").trim() !== "");
+    if (hasMeasurementDraft || !document.querySelector("#measurementSopRoot").hidden) throw new Error("LOCAL_DRAFT_PENDING");
+    const before = TankStore.serializeState();
+    const previousMode = tankFormMode;
+    suppressCloudSave = true;
+    try {
+      if (snapshot.tanks.length) tankFormMode = "edit";
+      TankStore.replaceState(snapshot);
+      if (JSON.stringify(loadJson(STORAGE_KEY)) !== JSON.stringify(TankStore.serializeState())) {
+        tankFormMode = previousMode;
+        TankStore.replaceState(before);
+        throw new Error("LOCAL_BACKUP_FAILED");
+      }
+    } finally { suppressCloudSave = false; }
+  },
+  saveBackup: (snapshot) => saveJson("seawaterTankCloudSafetyBackup.v1", snapshot),
+  loadMetadata: (ownerKey) => loadJson(`seawaterTankCloudSyncMeta.v1:${ownerKey}`),
+  saveMetadata: (ownerKey, metadata) => saveJson(`seawaterTankCloudSyncMeta.v1:${ownerKey}`, metadata),
+  onChange: (status) => {
+    renderCloudStatus();
+    const failure = ["error", "conflict"].includes(status.phase) ? status.message : "";
+    if (failure && failure !== previousCloudFailure) showToast(failure);
+    previousCloudFailure = failure;
+    if (status.phase === "connected" && status.pending) scheduleCloudSave();
+  },
 });
 
 const MeasurementSop = createMeasurementSopController({
@@ -1323,18 +1365,18 @@ function pageTitleFor(id) {
     tank: "設定",
     "bio-load": "生物負載",
     analysis: "分析結果",
-    cloud: "GPT 連接與同步",
+    cloud: "雲端資料同步",
   };
   return titles[id] || "首頁";
 }
 
 function switchPage(id, { updateRoute = true } = {}) {
-  if (!hasTanks() && id !== "tank") id = "tank";
+  if (!hasTanks() && !["tank", "cloud"].includes(id)) id = "tank";
   if (id === "tank" && hasTanks() && tankFormMode !== "create") tankFormMode = "edit";
   const activeNavSection = navSectionForPage(id);
   document.querySelectorAll(".page").forEach((page) => page.classList.toggle("active", page.id === id));
   document.querySelectorAll(".nav-link").forEach((link) => link.classList.toggle("active", link.dataset.section === activeNavSection));
-  document.querySelector("#pageTitle").textContent = !hasTanks()
+  document.querySelector("#pageTitle").textContent = !hasTanks() && id !== "cloud"
     ? "建立第一個魚缸"
     : pageTitleFor(id);
   if (updateRoute && window.location.hash !== `#${id}`) {
@@ -1400,98 +1442,90 @@ function applyDoseRecommendation(parameter) {
 }
 
 function loadCloudConfig() {
-  try {
-    return JSON.parse(localStorage.getItem(CLOUD_CONFIG_KEY)) || { url: "", anonKey: "" };
-  } catch {
-    return { url: "", anonKey: "" };
-  }
-}
-
-function saveCloudConfig(config) {
-  try {
-    localStorage.setItem(CLOUD_CONFIG_KEY, JSON.stringify(config));
-    return true;
-  } catch {
-    showToast("雲端設定無法儲存，請檢查瀏覽器儲存空間。");
-    return false;
-  }
+  return loadJson(CLOUD_CONFIG_KEY);
 }
 
 function initSupabaseClient() {
-  const config = loadCloudConfig();
-  if (!config.url || !config.anonKey || !window.supabase) {
-    supabaseClient = null;
-    return null;
+  if (!cloudConfiguration || !window.supabase) return null;
+  if (supabaseClient) return supabaseClient;
+  const client = window.supabase.createClient(cloudConfiguration.url, cloudConfiguration.publishableKey);
+  supabaseClient = client;
+  client.auth.onAuthStateChange?.((event, session) => {
+    if (supabaseClient !== client) return;
+    if (event === "TOKEN_REFRESHED") cloudSession = session;
+    if (event === "SIGNED_OUT") {
+      cloudSession = null;
+      window.clearTimeout(cloudSaveTimer);
+      CloudSync.disconnect();
+    }
+  });
+  return client;
+}
+
+async function setupCloudConnection() {
+  try {
+    cloudConfiguration = await loadDeploymentCloudConfig({ legacyConfig: loadCloudConfig() });
+    cloudSetupChecked = true;
+    if (!cloudConfiguration) {
+      renderCloudStatus();
+      return;
+    }
+    if (!initSupabaseClient()) throw new Error("CLIENT_UNAVAILABLE");
+    cloudConnectionError = "";
+    await refreshCloudSession();
+  } catch {
+    cloudSetupChecked = true;
+    cloudConnectionError = "雲端連線暫時無法使用，本機紀錄仍保留。";
+    renderCloudStatus();
   }
-  supabaseClient = window.supabase.createClient(config.url, config.anonKey);
-  return supabaseClient;
+}
+
+async function connectCloudSession(session) {
+  cloudSession = session;
+  if (!session) {
+    CloudSync.disconnect();
+    return false;
+  }
+  cloudConnectionError = "";
+  renderCloudStatus();
+  return CloudSync.connect({
+    ownerKey: cloudConfiguration.url + "::" + session.user.id,
+    repository: createSupabaseCloudRepository(supabaseClient, session.user.id),
+  });
 }
 
 async function refreshCloudSession() {
-  const client = supabaseClient || initSupabaseClient();
-  if (!client) {
-    cloudSession = null;
+  if (!supabaseClient) return null;
+  try {
+    const { data, error } = await supabaseClient.auth.getSession();
+    if (error) throw error;
+    await connectCloudSession(data.session || null);
+    return cloudSession;
+  } catch {
+    cloudConnectionError = "暫時無法確認登入狀態，本機紀錄仍保留。";
     renderCloudStatus();
     return null;
   }
-  const { data, error } = await client.auth.getSession();
-  if (error) {
-    cloudSession = null;
-  } else {
-    cloudSession = data.session || null;
-    const config = loadCloudConfig();
-    if (cloudSession && config.publishingUserId === cloudSession.user.id && config.lastUploadedAt) {
-      cloudSyncStatus = { message: `這台裝置最後成功同步：${new Date(config.lastUploadedAt).toLocaleString("zh-TW")}。GPT 只會讀取雲端已收到的紀錄。`, failed: false };
-    }
-  }
-  renderCloudStatus();
-  return cloudSession;
-}
-
-function renderCloudConfig() {
-  const config = loadCloudConfig();
-  document.querySelector("#supabaseUrl").value = config.url || "";
-  document.querySelector("#supabaseAnonKey").value = config.anonKey || "";
 }
 
 function renderCloudStatus() {
-  const badge = document.querySelector("#cloudStatusBadge");
-  const summary = document.querySelector("#cloudSummary");
-  const config = loadCloudConfig();
-  document.querySelector("#gptUserId").value = cloudSession?.user.id || "";
-  document.querySelector("#gptSchemaUrl").value = config.url ? `${config.url.replace(/\/$/, "")}/functions/v1/reef-gpt/openapi` : "";
-  const syncStatus = document.querySelector("#gptSyncStatus");
-  syncStatus.textContent = cloudSession ? cloudSyncStatus.message : "尚未同步，請先登入並上傳這台手機的紀錄。";
-  syncStatus.className = cloudSyncStatus.failed ? "notice compact warning" : "notice compact";
-  if (!window.supabase) {
-    badge.textContent = "套件未載入";
-    badge.className = "badge muted";
-    summary.innerHTML = `<div class="notice">無法載入 Supabase 套件。若離線或 CDN 被阻擋，雲端同步暫時不可用。</div>`;
-    return;
-  }
-  if (!config.url || !config.anonKey) {
-    badge.textContent = "未設定";
-    badge.className = "badge muted";
-    summary.innerHTML = `<div class="notice">請先填入 Supabase Project URL 與 anon key。</div>`;
-    return;
-  }
-  if (!cloudSession) {
-    badge.textContent = "未登入";
-    badge.className = "badge muted";
-    summary.innerHTML = `<div class="notice">雲端設定已儲存。登入後即可同步手機與電腦資料。</div>`;
-    return;
-  }
-  badge.textContent = "已登入";
-  badge.className = "badge";
-  summary.innerHTML = `
-    <div class="summary-item">帳號：${escapeHtml(cloudSession.user.email || cloudSession.user.id)}</div>
-    <div class="summary-item">同步資料：所有魚缸、紀錄、滴定設定、套用紀錄</div>
-    <div class="summary-item">模式：本機儲存後會自動排程上傳，也可手動上傳或下載。</div>
-  `;
+  const root = document.querySelector("#cloud");
+  renderCloudSyncView({
+    root,
+    status: CloudSync.getStatus(),
+    session: cloudSession,
+    configured: Boolean(cloudConfiguration && supabaseClient),
+    checkingSetup: !cloudSetupChecked,
+    authBusy: cloudAuthBusy,
+    connectionError: cloudConnectionError,
+  });
+  root.querySelector("#gptUserId").value = cloudSession?.user.id || "";
+  root.querySelector("#gptSchemaUrl").value = cloudConfiguration
+    ? cloudConfiguration.url + "/functions/v1/reef-gpt/openapi" : "";
+  root.querySelector("#cloudBackupDetails").hidden = !loadJson("seawaterTankCloudSafetyBackup.v1");
 }
 
 function renderCloudUi() {
-  renderCloudConfig();
   renderCloudStatus();
 }
 
@@ -1506,155 +1540,75 @@ function downloadJsonFile(filename, payload) {
 }
 
 function scheduleCloudSave() {
-  if (suppressCloudSave || !cloudSession || !supabaseClient) return;
-  if (loadCloudConfig().publishingUserId !== cloudSession.user.id) return;
+  if (suppressCloudSave || !cloudSession || !CloudSync.getStatus().canPublish || !CloudSync.getStatus().pending) return;
   window.clearTimeout(cloudSaveTimer);
-  cloudSaveTimer = window.setTimeout(() => {
-    uploadCloudState({ silent: true });
-  }, 1200);
+  cloudSaveTimer = window.setTimeout(() => CloudSync.sync(), 1200);
 }
 
-function uploadCloudState(options = {}) {
-  cloudUploadQueue = cloudUploadQueue.catch(() => {}).then(() => performCloudUpload(options));
-  return cloudUploadQueue;
-}
-
-async function performCloudUpload({ silent = false } = {}) {
-  const client = supabaseClient || initSupabaseClient();
-  if (!client) {
-    if (!silent) showToast("請先設定 Supabase");
-    return false;
-  }
-  const session = cloudSession || (await refreshCloudSession());
-  if (!session) {
-    if (!silent) showToast("請先登入");
-    return false;
-  }
-  const payload = TankStore.serializeState();
-  if (!payload.tanks.length) {
-    if (!silent) showToast("目前沒有魚缸資料，請先新增魚缸；不會用空資料覆蓋雲端。");
-    return false;
-  }
-  const config = loadCloudConfig();
-  if (config.publishingUserId !== session.user.id) {
-    if (silent) return false;
-    if (!confirm("要把這台手機設為資料上傳裝置嗎？\n\n將上傳所有魚缸與紀錄；同帳號已有雲端資料時會被取代。請先下載備份。之後儲存會自動同步，供 GPT 讀取。")) return false;
-  }
-  cloudSyncStatus = { message: "正在同步到雲端…", failed: false };
-  renderCloudStatus();
-  const updatedAt = new Date().toISOString();
-  let error;
-  try {
-    ({ error } = await client.from(CLOUD_TABLE).upsert({
-      user_id: session.user.id,
-      data: payload,
-      updated_at: updatedAt,
-    }));
-  } catch (cause) {
-    error = cause;
-  }
-  if (error) {
-    cloudSyncStatus = { message: "同步失敗，本機資料仍保留；GPT 可能讀到舊紀錄，請重新上傳。", failed: true };
-    showToast(cloudSyncStatus.message);
-    renderCloudStatus();
-    return false;
-  }
-  if (cloudSession?.user.id !== session.user.id || loadCloudConfig().url !== config.url) return true;
-  if (!saveCloudConfig({ ...config, publishingUserId: session.user.id, lastUploadedAt: updatedAt })) {
-    cloudSyncStatus = { message: "資料已上傳，但本機無法保存同步設定；自動同步可能無法啟用。", failed: true };
-    renderCloudStatus();
-    return true;
-  }
-  cloudSyncStatus = { message: `最後成功同步：${new Date(updatedAt).toLocaleString("zh-TW")}。已接通 GPT Action 時可讀取這次資料。`, failed: false };
-  if (!silent) showToast("已上傳到雲端");
-  renderCloudStatus();
-  return true;
+async function initializeCloudRecords() {
+  const imported = await CloudSync.initialize((summary) => confirm(
+    "首次匯入 " + summary.tanks + " 個魚缸、" + summary.records + " 筆水質紀錄？\n\n本機資料會先保存安全備份。雲端已有資料時，不會再次匯入覆蓋。",
+  ));
+  if (imported) showToast("首次匯入完成，雲端資料已啟用。");
 }
 
 async function downloadCloudState() {
-  const client = supabaseClient || initSupabaseClient();
-  if (!client) {
-    showToast("請先設定 Supabase");
-    return;
-  }
-  const session = cloudSession || (await refreshCloudSession());
-  if (!session) {
-    showToast("請先登入");
-    return;
-  }
-  const { data, error } = await client
-    .from(CLOUD_TABLE)
-    .select("data, updated_at")
-    .eq("user_id", session.user.id)
-    .maybeSingle();
-  if (error) {
-    showToast(`下載失敗：${error.message}`);
-    return;
-  }
-  if (!data || !data.data) {
-    showToast("雲端目前沒有資料，請先上傳");
-    return;
-  }
-  if (!confirm(`確定要用雲端資料覆蓋這台裝置的資料？\n\n雲端更新時間：${data.updated_at || "未知"}`)) return;
-  suppressCloudSave = true;
-  TankStore.replaceState(data.data);
-  suppressCloudSave = false;
-  showToast("已從雲端下載");
+  const loaded = await CloudSync.loadCloud(() => confirm(
+    "確定要載入此帳號的雲端紀錄？\n\n這台裝置目前的紀錄會先保存安全備份，再以雲端資料更新畫面。",
+  ));
+  if (loaded) showToast("雲端紀錄已載入。");
 }
 
-async function signInCloud() {
-  const client = supabaseClient || initSupabaseClient();
-  if (!client) {
-    showToast("請先儲存雲端設定");
-    return;
-  }
+function cloudAuthMessage(error) {
+  if (/invalid login credentials/i.test(error?.message || "")) return "Email 或密碼不正確，請重新確認。";
+  if (/email not confirmed/i.test(error?.message || "")) return "請先到信箱完成帳號驗證，再登入。";
+  return "暫時無法完成登入，請確認網路與帳號設定。";
+}
+
+async function signInCloud(event) {
+  event?.preventDefault();
+  if (!supabaseClient) return showToast("雲端後台尚未啟用，本機紀錄照常保留。");
   const email = document.querySelector("#authEmail").value.trim();
   const password = document.querySelector("#authPassword").value;
-  if (!email || !password) {
-    showToast("請輸入 Email 和密碼");
-    return;
-  }
-  const { data, error } = await client.auth.signInWithPassword({ email, password });
-  if (error) {
-    showToast(`登入失敗：${error.message}`);
-    return;
-  }
-  cloudSession = data.session;
+  if (!email || !password) return showToast("請輸入 Email 和密碼。");
+  cloudAuthBusy = true;
   renderCloudStatus();
-  showToast("已登入");
+  try {
+    const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+    if (error) throw error;
+    document.querySelector("#authPassword").value = "";
+    if (await connectCloudSession(data.session)) showToast("已登入雲端。");
+  } catch (error) { showToast(cloudAuthMessage(error)); }
+  finally { cloudAuthBusy = false; renderCloudStatus(); }
 }
 
 async function signUpCloud() {
-  const client = supabaseClient || initSupabaseClient();
-  if (!client) {
-    showToast("請先儲存雲端設定");
-    return;
-  }
+  if (!supabaseClient) return showToast("雲端後台尚未啟用，本機紀錄照常保留。");
   const email = document.querySelector("#authEmail").value.trim();
   const password = document.querySelector("#authPassword").value;
-  if (!email || !password) {
-    showToast("請輸入 Email 和密碼");
-    return;
-  }
-  const { data, error } = await client.auth.signUp({ email, password });
-  if (error) {
-    showToast(`建立帳號失敗：${error.message}`);
-    return;
-  }
-  cloudSession = data.session || null;
+  if (!email || !password) return showToast("請輸入 Email 和密碼。");
+  cloudAuthBusy = true;
   renderCloudStatus();
-  showToast(cloudSession ? "帳號已建立並登入" : "帳號已建立，請依 Supabase 設定完成 Email 驗證");
+  try {
+    const { data, error } = await supabaseClient.auth.signUp({ email, password });
+    if (error) throw error;
+    document.querySelector("#authPassword").value = "";
+    if (data.session) await connectCloudSession(data.session);
+    showToast(data.session ? "帳號已建立並登入。" : "帳號已建立，請到信箱完成驗證後登入。");
+  } catch (error) { showToast(cloudAuthMessage(error)); }
+  finally { cloudAuthBusy = false; renderCloudStatus(); }
 }
 
 async function signOutCloud() {
-  const client = supabaseClient || initSupabaseClient();
-  if (!client) return;
-  await client.auth.signOut();
-  cloudSession = null;
-  window.clearTimeout(cloudSaveTimer);
-  cloudSyncStatus = { message: "已登出，暫停自動同步。", failed: false };
-  renderCloudStatus();
-  showToast("已登出");
+  if (!supabaseClient) return;
+  try {
+    const { error } = await supabaseClient.auth.signOut();
+    if (error) throw error;
+    cloudSession = null;
+    window.clearTimeout(cloudSaveTimer);
+    CloudSync.disconnect();
+    showToast("已登出，暫停雲端同步。");
+  } catch { showToast("登出未完成，請確認網路後重試。"); }
 }
 
 function setupEvents() {
@@ -1778,32 +1732,20 @@ function setupEvents() {
     showToast(`魚缸已刪除，已切換到 ${tankSettings().name}。`);
   });
 
-  document.querySelector("#saveCloudConfigBtn").addEventListener("click", async () => {
-    const url = document.querySelector("#supabaseUrl").value.trim();
-    const anonKey = document.querySelector("#supabaseAnonKey").value.trim();
-    const previousConfig = loadCloudConfig();
-    const sameProject = previousConfig.url === url && previousConfig.anonKey === anonKey;
-    if (!saveCloudConfig({ ...(sameProject ? previousConfig : {}), url, anonKey })) return;
-    initSupabaseClient();
-    await refreshCloudSession();
-    showToast("雲端設定已儲存");
-  });
-
-  document.querySelector("#clearCloudConfigBtn").addEventListener("click", () => {
-    localStorage.removeItem(CLOUD_CONFIG_KEY);
-    supabaseClient = null;
-    cloudSession = null;
-    window.clearTimeout(cloudSaveTimer);
-    cloudSyncStatus = { message: "尚未同步，GPT 暫時讀不到這台手機的紀錄。", failed: false };
-    renderCloudUi();
-    showToast("雲端設定已清除");
-  });
-
-  document.querySelector("#signInBtn").addEventListener("click", signInCloud);
+  document.querySelector("#cloudAuthForm").addEventListener("submit", signInCloud);
   document.querySelector("#signUpBtn").addEventListener("click", signUpCloud);
   document.querySelector("#signOutBtn").addEventListener("click", signOutCloud);
-  document.querySelector("#uploadCloudBtn").addEventListener("click", () => uploadCloudState());
+  document.querySelector("#uploadCloudBtn").addEventListener("click", initializeCloudRecords);
   document.querySelector("#downloadCloudBtn").addEventListener("click", downloadCloudState);
+  document.querySelector("#cloudSyncNowBtn").addEventListener("click", async () => {
+    if (CloudSync.getStatus().pending && CloudSync.getStatus().canPublish) await CloudSync.sync();
+    else await CloudSync.refresh();
+  });
+  document.querySelector("#cloudDownloadBackupBtn").addEventListener("click", () => {
+    const backup = loadJson("seawaterTankCloudSafetyBackup.v1");
+    if (backup) downloadJsonFile("reef-before-cloud-backup.json", backup);
+  });
+  window.addEventListener("online", scheduleCloudSave);
 
   document.querySelector("#tankForm").addEventListener("submit", (event) => {
     event.preventDefault();
@@ -2068,8 +2010,7 @@ setupEvents();
 TankStore.runRetentionCleanup();
 renderAll();
 switchPage(pageIdFromHash(), { updateRoute: false });
-initSupabaseClient();
-refreshCloudSession();
+setupCloudConnection();
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {

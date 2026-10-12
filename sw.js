@@ -1,4 +1,4 @@
-const CACHE_NAME = "seawater-tank-mvp-v41";
+const CACHE_NAME = "seawater-tank-mvp-v42";
 const APP_SHELL = [
   "./",
   "index.html",
@@ -20,12 +20,15 @@ const APP_SHELL = [
   "services/retentionService.js",
   "services/storageService.js",
   "services/tankStore.js",
+  "services/cloudConfigService.js",
+  "services/cloudSyncService.js",
   "engines/safetyEngine.js",
   "engines/analysisEngine.js",
   "engines/eventRecoveryEngine.js",
   "engines/stabilityEngine.js",
   "components/aiExplanationModule.js",
   "components/appVersionFooter.js",
+  "components/cloudSyncComponent.js",
   "components/dashboardModule.js",
   "components/measurementSopComponent.js",
   "types/domainTypes.js",
@@ -59,7 +62,7 @@ self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
   const url = new URL(event.request.url);
   if (url.origin !== self.location.origin) return;
-  if (url.pathname.endsWith("/version.json")) {
+  if (url.pathname.endsWith("/version.json") || url.pathname.endsWith("/cloud-config.json")) {
     event.respondWith(fetch(event.request, { cache: "no-store" }));
     return;
   }

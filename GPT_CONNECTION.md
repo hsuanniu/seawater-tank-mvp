@@ -12,19 +12,38 @@
 
 在目前有紀錄的手機開啟 App，選「設定 → 下載備份」。請使用這台手機完成第一次上傳。全新裝置不會自動上傳空資料。
 
-## 2. 建立 Supabase 與登入帳號
+## 2. 後台連線設定（只做一次）
 
 1. 在 Supabase 建立一個專案。
 2. 在 SQL Editor 執行本專案的 `supabase-schema.sql`。
-3. 找到專案 URL 與公開的 publishable / anon key。
-4. 在海水缸 App 選「設定 → GPT 連接與同步」，填入 URL 和公開 key，按「儲存雲端設定」。
-5. 用自己的 Email 建立帳號，若啟用信箱驗證，完成驗證後再登入。
-6. 按「上傳到雲端」，確認使用這台手機作為上傳裝置。
-7. 確認顯示最後成功同步時間。展開「GPT 連接資訊」，取得雲端使用者 ID。
+3. 找到專案 URL 與公開的 publishable key。
+4. 到 Render 這個 Static Site 的 Environment，設定：
+
+   | 變數 | 內容 |
+   | --- | --- |
+   | `REEF_SUPABASE_URL` | `https://你的專案代碼.supabase.co` |
+   | `REEF_SUPABASE_PUBLISHABLE_KEY` | 公開的 `sb_publishable_...` 金鑰 |
+   | `NODE_VERSION` | `24` |
+
+5. Render 的 Build Command 設為 `npm run build`，Publish Directory 保持 `.`，重新部署。
+
+建置會產生公開的 `cloud-config.json`；只有專案網址與公開金鑰會進入網站，不包含密碼、server secret 或 GPT token。未設定後台時，網站顯示「雲端後台尚未啟用」，本機功能仍正常。
+
+新版 SQL 新增 `revision` 欄位，既有魚缸 JSON 不變。首次匯入與後續儲存改為資料庫函式，避免舊裝置直接覆蓋。已經有資料的 Supabase 專案也可以重新執行 SQL，不會刪除既有紀錄。須完成新版 SQL 後再啟用新同步流程。
+
+### 手機操作
+
+1. 開啟「設定 → 雲端資料同步」，只需用 Email／密碼登入或建立帳號。
+2. 確認「這台裝置」與「雲端資料庫」的魚缸／紀錄數量。
+3. 雲端尚未有資料時，按「首次匯入」，確認後建立正式雲端資料；空裝置不能首次匯入。
+4. 初始化後不再提供重新匯入。之後儲存會自動同步，並顯示最後同步時間。
+5. 新裝置登入時，沒有本機資料會自動載入雲端；有原本本機紀錄時會先詢問，再保存安全備份並載入。
+6. 同步前備份可在此頁展開「本機安全備份」下載，再用既有備份還原功能恢復。
+7. 若兩台裝置都有修改，系統會停止舊版本上傳，保留本機內容並提示確認，不會默默覆蓋新版。
 
 公開 key 可用於 App；**service role key、GPT 讀取 token 都不能填在前端、放進 GitHub 或貼在聊天裡**。
 
-之後登入且已確認為上傳裝置時，儲存會排程自動同步。同步失敗會保留本機資料並提示，重新上傳前 GPT 可能讀到舊紀錄。其他裝置須先下載雲端資料，不能直接以舊本機資料覆蓋。
+同步失敗會保留本機資料並提示；重新連線後會比對版本，安全恢復未完成的上傳。GPT 只會讀到最後成功同步的紀錄。
 
 ## 3. 設定並部署唯讀 API
 
@@ -109,6 +128,6 @@ npm test
 npm run build
 ```
 
-`tests/reefGpt.test.mjs` 使用獨立 fixture，涵蓋規則引擎一致性、沿用／缺值、停用滴定、資料時效、archive 排除、重複套用、多魚缸、唯讀驗證及 owner 隔離，不讀寫正式雲端資料。本機測試不能代替 Supabase 部署與 GPT Action 的實際連接測試。
+`tests/reefGpt.test.mjs` 使用獨立 fixture，涵蓋規則引擎一致性、沿用／缺值、停用滴定、資料時效、archive 排除、重複套用、多魚缸、唯讀驗證及 owner 隔離。`tests/cloudSync.test.mjs` 涵蓋首次確認、不可重複匯入、離線保留、版本衝突、備份失敗、跨裝置載入與登入取消。不讀寫正式雲端資料。本機測試不能代替 Supabase 部署與 GPT Action 的實際連接測試。
 
 參考：[OpenAI GPT Actions](https://developers.openai.com/api/docs/actions/introduction)、[Action 驗證](https://developers.openai.com/api/docs/actions/authentication)、[Supabase Edge Function 驗證](https://supabase.com/docs/guides/functions/auth)。
