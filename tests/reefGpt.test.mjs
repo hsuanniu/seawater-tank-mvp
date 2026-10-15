@@ -160,6 +160,20 @@ test("Read-only API authenticates before touching private data and refuses all w
   assert.equal(reads, 1);
 });
 
+test("GPT Actions schema includes an object schemas section and valid production action URLs", () => {
+  const apiUrl = "https://reef-tank-cloud.vercel.app/api/gpt";
+  const schema = reefGptOpenApi(`${apiUrl}/`);
+  assert.equal(schema.servers[0].url, apiUrl);
+  assert.ok(schema.components.schemas && typeof schema.components.schemas === "object");
+  assert.equal(Array.isArray(schema.components.schemas), false);
+  assert.deepEqual(schema.components.securitySchemes.reefReadToken, { type: "http", scheme: "bearer" });
+  for (const path of Object.keys(schema.paths)) {
+    const url = new URL(`${schema.servers[0].url}${path}`);
+    assert.equal(url.origin, "https://reef-tank-cloud.vercel.app");
+    assert.ok(url.pathname.startsWith("/api/gpt/"));
+  }
+});
+
 test("OpenAPI is public but all data operations are authenticated GET requests", async () => {
   const schema = reefGptOpenApi(baseUrl);
   assert.equal(schema.servers[0].url, baseUrl);

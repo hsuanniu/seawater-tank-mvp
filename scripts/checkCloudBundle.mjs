@@ -16,7 +16,9 @@ for (const path of ["/healthz", "/api/openapi", "/api/internal/session", "/api/g
 }
 const schema = await api.fetch(new Request("http://localhost:10000/api/openapi"));
 assert.equal(schema.status, 200);
-assert.equal((await schema.json()).openapi, "3.1.0");
+const document = await schema.json();
+assert.equal(document.openapi, "3.1.0");
+assert.deepEqual(document.components.schemas, {}, "GPT Actions requires an object schemas section");
 const query = await api.fetch(new Request("http://localhost:10000/api/openapi?owner=someone-else"));
 assert.equal(query.status, 400);
 console.log("Cloud bundle verified: engines included, routes preserve paths without query injection, and API starts without reading tank data.");
