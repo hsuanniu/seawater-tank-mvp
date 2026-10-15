@@ -23,7 +23,24 @@ export function normalizeCloudConfig(config) {
   }
 }
 
-export function deploymentCloudConfig(env) {
+export function normalizeAdminCloudConfig(config) {
+  const apiUrl = String(config?.apiUrl || "").trim().replace(/\/$/, "");
+  if (!apiUrl) return null;
+  try {
+    const url = new URL(apiUrl);
+    const local = ["localhost", "127.0.0.1"].includes(url.hostname);
+    if ((url.protocol !== "https:" && !(local && url.protocol === "http:")) || url.origin !== apiUrl || url.username || url.password) return null;
+    return { mode: "admin", apiUrl };
+  } catch { return null; }
+}
+
+export function deploymentCloudConfig(env, defaults = null) {
+  const apiUrl = env.REEF_CLOUD_API_URL || defaults?.apiUrl;
+  if (apiUrl) {
+    const config = normalizeAdminCloudConfig({ apiUrl });
+    if (!config) throw new Error("REEF_CLOUD_API_URL must be an HTTPS origin, without credentials or paths");
+    return { configured: true, ...config };
+  }
   const url = env.REEF_SUPABASE_URL || "";
   const publishableKey = env.REEF_SUPABASE_PUBLISHABLE_KEY || "";
   if (!url && !publishableKey) return { configured: false, url: "", publishableKey: "" };
@@ -36,7 +53,8 @@ export async function loadDeploymentCloudConfig({ fetchImpl = fetch, legacyConfi
   try {
     const response = await fetchImpl("cloud-config.json", { cache: "no-store" });
     if (!response.ok) throw new Error("CONFIG_UNAVAILABLE");
-    const config = normalizeCloudConfig(await response.json());
+    const value = await response.json();
+    const config = normalizeAdminCloudConfig(value) || normalizeCloudConfig(value);
     if (config) return { ...config, source: "deployment" };
   } catch {
     // Existing devices may keep using their previous public connection settings.

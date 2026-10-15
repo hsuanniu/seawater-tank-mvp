@@ -484,12 +484,11 @@
             <p id="cloudSetupNotice" class="notice compact" role="status">正在確認雲端連線</p>
             <form id="cloudAuthForm" class="cloud-auth-form" hidden>
               <div class="form-grid">
-                <label>Email<input id="authEmail" type="email" autocomplete="email" required /></label>
-                <label>密碼<input id="authPassword" type="password" autocomplete="current-password" required /></label>
+                <label>管理密碼<input id="authPassword" type="password" autocomplete="current-password" placeholder="輸入管理密碼" required /></label>
               </div>
-              <button class="primary-button" id="signInBtn" type="submit">登入雲端</button>
-              <button class="ghost-button" id="signUpBtn" type="button">建立帳號</button>
+              <button class="primary-button" id="signInBtn" type="submit">連線雲端資料庫</button>
             </form>
+            <button class="ghost-button" id="cloudRetrySetupBtn" type="button" hidden>重試連線</button>
             <div id="cloudImportActions" class="cloud-sync-actions" hidden><button class="primary-button" id="uploadCloudBtn" type="button">首次匯入紀錄</button></div>
             <div id="cloudLoadActions" class="cloud-sync-actions" hidden><button class="primary-button" id="downloadCloudBtn" type="button">載入雲端紀錄</button></div>
             <div id="cloudConnectedActions" class="cloud-sync-actions" hidden><button class="ghost-button" id="cloudSyncNowBtn" type="button">重新同步</button></div>
@@ -497,11 +496,10 @@
             <p id="cloudLastSynced" class="cloud-sync-time">尚未完成同步</p>
             <p id="cloudImportProtection" class="cloud-sync-protection" hidden>首次匯入已完成。為保護現有紀錄，不再提供本機重新匯入。</p>
             <details id="cloudBackupDetails" class="cloud-backup-details" hidden><summary>本機安全備份</summary><button class="ghost-button" id="cloudDownloadBackupBtn" type="button">下載同步前備份</button></details>
-            <button class="ghost-button cloud-signout" id="signOutBtn" type="button" hidden>登出雲端</button>
+            <button class="ghost-button cloud-signout" id="signOutBtn" type="button" hidden>登出管理連線</button>
             <details id="gptLinkDetails" class="cloud-gpt-details" hidden>
               <summary>GPT 連接資訊</summary>
               <div class="form-grid">
-                <label>雲端使用者 ID<input id="gptUserId" type="text" readonly /></label>
                 <label>GPT Action 設定網址<input id="gptSchemaUrl" type="url" readonly /></label>
               </div>
             </details>
@@ -521,8 +519,7 @@
       <button class="nav-link mobile-nav-link" data-section="tank">設定</button>
     </nav>
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script type="module" src="app.module.js?v=20261012-simple-cloud-sync2"></script>
-    <script defer src="app.js?v=20261012-simple-cloud-sync2"></script>
+    <script type="module" src="app.module.js?v=20261014-admin-cloud"></script>
+    <script defer src="app.js?v=20261014-admin-cloud"></script>
   </body>
 </html>

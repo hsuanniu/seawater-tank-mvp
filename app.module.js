@@ -15,19 +15,20 @@ import { escapeHtml, formatNumber, targetToText, toNumber } from "./services/for
 import { restoreBackupText } from "./services/backupService.js";
 import { createTankStore } from "./services/tankStore.js";
 import { loadDeploymentCloudConfig } from "./services/cloudConfigService.js";
-import { createCloudSyncController, createSupabaseCloudRepository } from "./services/cloudSyncService.js";
+import { createAdminCloudClient } from "./services/adminCloudService.js";
+import { createCloudSyncController } from "./services/cloudSyncService.js";
 import { loadJson, saveJson } from "./services/storageService.js";
 
 const STORAGE_KEY = "seawaterTankMvp.v4";
-const CLOUD_CONFIG_KEY = "seawaterTankCloudConfig.v1";
 const APP_VERSION_STORAGE_KEY = "seawaterTankAppVersion.v1";
 const FALLBACK_VERSION = {
-  version: "1.0.4",
-  current_version: "1.0.4",
-  build_time: "2026-10-12T00:00:00+08:00",
+  version: "1.1.0",
+  current_version: "1.1.0",
+  build_time: "2026-10-14T00:00:00+08:00",
 };
 const DEBUG_MODE = false;
-let supabaseClient = null;
+let adminCloudClient = null;
+let cloudBackendReady = false;
 let cloudSession = null;
 let cloudSaveTimer = null;
 let cloudConfiguration = null;
@@ -1441,41 +1442,27 @@ function applyDoseRecommendation(parameter) {
   showToast(`${row.label} 滴定建議已套用`);
 }
 
-function loadCloudConfig() {
-  return loadJson(CLOUD_CONFIG_KEY);
-}
-
-function initSupabaseClient() {
-  if (!cloudConfiguration || !window.supabase) return null;
-  if (supabaseClient) return supabaseClient;
-  const client = window.supabase.createClient(cloudConfiguration.url, cloudConfiguration.publishableKey);
-  supabaseClient = client;
-  client.auth.onAuthStateChange?.((event, session) => {
-    if (supabaseClient !== client) return;
-    if (event === "TOKEN_REFRESHED") cloudSession = session;
-    if (event === "SIGNED_OUT") {
-      cloudSession = null;
-      window.clearTimeout(cloudSaveTimer);
-      CloudSync.disconnect();
-    }
-  });
-  return client;
-}
-
 async function setupCloudConnection() {
+  cloudSetupChecked = false;
+  cloudConnectionError = "";
+  renderCloudStatus();
   try {
-    cloudConfiguration = await loadDeploymentCloudConfig({ legacyConfig: loadCloudConfig() });
-    cloudSetupChecked = true;
-    if (!cloudConfiguration) {
-      renderCloudStatus();
-      return;
-    }
-    if (!initSupabaseClient()) throw new Error("CLIENT_UNAVAILABLE");
-    cloudConnectionError = "";
+    cloudConfiguration = await loadDeploymentCloudConfig();
+    if (!cloudConfiguration?.apiUrl) { cloudBackendReady = false; return; }
+    adminCloudClient = createAdminCloudClient({
+      apiUrl: cloudConfiguration.apiUrl,
+      onUnauthorized: () => {
+        cloudSession = null;
+        window.clearTimeout(cloudSaveTimer);
+        CloudSync.disconnect();
+        showToast("管理連線已到期，請重新輸入管理密碼。本機紀錄仍保留。");
+      },
+    });
     await refreshCloudSession();
   } catch {
-    cloudSetupChecked = true;
     cloudConnectionError = "雲端連線暫時無法使用，本機紀錄仍保留。";
+  } finally {
+    cloudSetupChecked = true;
     renderCloudStatus();
   }
 }
@@ -1489,23 +1476,17 @@ async function connectCloudSession(session) {
   cloudConnectionError = "";
   renderCloudStatus();
   return CloudSync.connect({
-    ownerKey: cloudConfiguration.url + "::" + session.user.id,
-    repository: createSupabaseCloudRepository(supabaseClient, session.user.id),
+    ownerKey: cloudConfiguration.apiUrl + "::" + session.libraryId,
+    repository: adminCloudClient.repository,
   });
 }
 
 async function refreshCloudSession() {
-  if (!supabaseClient) return null;
-  try {
-    const { data, error } = await supabaseClient.auth.getSession();
-    if (error) throw error;
-    await connectCloudSession(data.session || null);
-    return cloudSession;
-  } catch {
-    cloudConnectionError = "暫時無法確認登入狀態，本機紀錄仍保留。";
-    renderCloudStatus();
-    return null;
-  }
+  if (!adminCloudClient) return null;
+  const status = await adminCloudClient.getSession();
+  cloudBackendReady = status.databaseConfigured && status.adminAuthConfigured;
+  await connectCloudSession(status.session);
+  return cloudSession;
 }
 
 function renderCloudStatus() {
@@ -1514,14 +1495,13 @@ function renderCloudStatus() {
     root,
     status: CloudSync.getStatus(),
     session: cloudSession,
-    configured: Boolean(cloudConfiguration && supabaseClient),
+    configured: Boolean(adminCloudClient && cloudBackendReady),
     checkingSetup: !cloudSetupChecked,
     authBusy: cloudAuthBusy,
     connectionError: cloudConnectionError,
   });
-  root.querySelector("#gptUserId").value = cloudSession?.user.id || "";
-  root.querySelector("#gptSchemaUrl").value = cloudConfiguration
-    ? cloudConfiguration.url + "/functions/v1/reef-gpt/openapi" : "";
+  root.querySelector("#gptSchemaUrl").value = cloudConfiguration?.apiUrl
+    ? cloudConfiguration.apiUrl + "/api/openapi" : "";
   root.querySelector("#cloudBackupDetails").hidden = !loadJson("seawaterTankCloudSafetyBackup.v1");
 }
 
@@ -1554,61 +1534,42 @@ async function initializeCloudRecords() {
 
 async function downloadCloudState() {
   const loaded = await CloudSync.loadCloud(() => confirm(
-    "確定要載入此帳號的雲端紀錄？\n\n這台裝置目前的紀錄會先保存安全備份，再以雲端資料更新畫面。",
+    "確定要載入正式雲端紀錄？\n\n這台裝置目前的紀錄會先保存安全備份，再以雲端資料更新畫面。",
   ));
   if (loaded) showToast("雲端紀錄已載入。");
 }
 
 function cloudAuthMessage(error) {
-  if (/invalid login credentials/i.test(error?.message || "")) return "Email 或密碼不正確，請重新確認。";
-  if (/email not confirmed/i.test(error?.message || "")) return "請先到信箱完成帳號驗證，再登入。";
-  return "暫時無法完成登入，請確認網路與帳號設定。";
+  if (error?.message === "INVALID_ADMIN_PASSWORD") return "管理密碼錯誤，請重新確認。";
+  if (error?.message === "TOO_MANY_ATTEMPTS") return "嘗試次數過多，請稍後再試。本機紀錄仍保留。";
+  return "暫時無法建立管理連線，請確認網路與後台設定。";
 }
 
 async function signInCloud(event) {
   event?.preventDefault();
-  if (!supabaseClient) return showToast("雲端後台尚未啟用，本機紀錄照常保留。");
-  const email = document.querySelector("#authEmail").value.trim();
+  if (!adminCloudClient || !cloudBackendReady) return showToast("雲端後台尚未啟用，本機紀錄照常保留。");
   const password = document.querySelector("#authPassword").value;
-  if (!email || !password) return showToast("請輸入 Email 和密碼。");
+  if (!password) return showToast("請輸入管理密碼。");
   cloudAuthBusy = true;
   renderCloudStatus();
   try {
-    const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
-    if (error) throw error;
+    const session = await adminCloudClient.signIn(password);
     document.querySelector("#authPassword").value = "";
-    if (await connectCloudSession(data.session)) showToast("已登入雲端。");
-  } catch (error) { showToast(cloudAuthMessage(error)); }
-  finally { cloudAuthBusy = false; renderCloudStatus(); }
-}
-
-async function signUpCloud() {
-  if (!supabaseClient) return showToast("雲端後台尚未啟用，本機紀錄照常保留。");
-  const email = document.querySelector("#authEmail").value.trim();
-  const password = document.querySelector("#authPassword").value;
-  if (!email || !password) return showToast("請輸入 Email 和密碼。");
-  cloudAuthBusy = true;
-  renderCloudStatus();
-  try {
-    const { data, error } = await supabaseClient.auth.signUp({ email, password });
-    if (error) throw error;
-    document.querySelector("#authPassword").value = "";
-    if (data.session) await connectCloudSession(data.session);
-    showToast(data.session ? "帳號已建立並登入。" : "帳號已建立，請到信箱完成驗證後登入。");
+    if (await connectCloudSession(session)) showToast("管理連線已建立。");
   } catch (error) { showToast(cloudAuthMessage(error)); }
   finally { cloudAuthBusy = false; renderCloudStatus(); }
 }
 
 async function signOutCloud() {
-  if (!supabaseClient) return;
+  if (!adminCloudClient) return;
+  window.clearTimeout(cloudSaveTimer);
+  CloudSync.disconnect();
+  cloudSession = null;
   try {
-    const { error } = await supabaseClient.auth.signOut();
-    if (error) throw error;
-    cloudSession = null;
-    window.clearTimeout(cloudSaveTimer);
-    CloudSync.disconnect();
+    await adminCloudClient.signOut();
     showToast("已登出，暫停雲端同步。");
-  } catch { showToast("登出未完成，請確認網路後重試。"); }
+  } catch { showToast("這台裝置已登出。網路中斷，伺服器連線將於到期時失效。"); }
+  finally { renderCloudStatus(); }
 }
 
 function setupEvents() {
@@ -1733,7 +1694,7 @@ function setupEvents() {
   });
 
   document.querySelector("#cloudAuthForm").addEventListener("submit", signInCloud);
-  document.querySelector("#signUpBtn").addEventListener("click", signUpCloud);
+  document.querySelector("#cloudRetrySetupBtn").addEventListener("click", setupCloudConnection);
   document.querySelector("#signOutBtn").addEventListener("click", signOutCloud);
   document.querySelector("#uploadCloudBtn").addEventListener("click", initializeCloudRecords);
   document.querySelector("#downloadCloudBtn").addEventListener("click", downloadCloudState);

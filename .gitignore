@@ -5,3 +5,6 @@ dist/
 .env.*
 *.log
 supabase/.temp/
+.vercel/
+.vercel
+.env*

@@ -23,6 +23,7 @@ async function digest(data) {
 }
 
 function cloudError(error) {
+  if (error?.message === "SESSION_EXPIRED") return "管理連線已到期，請重新輸入管理密碼；本機紀錄仍保留。";
   if (error?.message?.includes("CLOUD_REVISION_CONFLICT")) return "另一台裝置已更新雲端。這台的紀錄仍保留，請先確認再載入雲端。";
   if (error?.message?.includes("CLOUD_ALREADY_INITIALIZED")) return "雲端已經有資料，不能再次匯入本機資料覆蓋。";
   if (error?.message?.includes("LOCAL_BACKUP_FAILED")) return "無法保存本機安全備份，暫不載入雲端；原本紀錄仍保留。";
@@ -61,7 +62,7 @@ export function createCloudSyncController({ getLocalState, replaceLocalState, sa
   let syncedChanges = 0;
   let hydrating = false;
   let queue = Promise.resolve();
-  let status = { phase: "signed_out", remote: null, revision: null, lastSyncedAt: null, message: "尚未登入雲端" };
+  let status = { phase: "signed_out", remote: null, revision: null, lastSyncedAt: null, message: "尚未建立管理連線" };
 
   function update(patch) {
     status = { ...status, ...patch };
@@ -138,7 +139,7 @@ export function createCloudSyncController({ getLocalState, replaceLocalState, sa
         return true;
       }
       if (metadata || !getLocalState().tanks.length) return hydrate(snapshot, ownerKey, ticket);
-      update({ phase: "awaiting_load", message: "此帳號已有雲端紀錄，請確認後載入；本機會先保存安全備份" });
+      update({ phase: "awaiting_load", message: "正式雲端已有紀錄，請確認後載入；本機會先保存安全備份" });
       return true;
     } catch (error) { return ticket === generation ? fail(error) : false; }
   }
@@ -210,7 +211,7 @@ export function createCloudSyncController({ getLocalState, replaceLocalState, sa
     disconnect() {
       generation += 1;
       binding = null;
-      update({ phase: "signed_out", remote: null, revision: null, lastSyncedAt: null, message: "已登出，暫停同步" });
+      update({ phase: "signed_out", remote: null, revision: null, lastSyncedAt: null, message: "管理連線未建立，暫停同步" });
     },
   };
 }

@@ -1,5 +1,5 @@
 {
-  "configured": false,
-  "url": "",
-  "publishableKey": ""
+  "configured": true,
+  "mode": "admin",
+  "apiUrl": "https://reef-tank-cloud.vercel.app"
 }

@@ -1,5 +1,5 @@
 const PHASE_LABELS = {
-  signed_out: "未登入", checking: "確認中", awaiting_import: "等待首次匯入",
+  signed_out: "未連線", checking: "確認中", awaiting_import: "等待首次匯入",
   awaiting_load: "等待載入", syncing: "同步中", connected: "已連線", conflict: "待確認", error: "同步失敗",
 };
 
@@ -13,13 +13,15 @@ export function renderCloudSyncView({ root, status, session, configured, checkin
   element("cloudLocalTanks").textContent = `${status.local.tanks} 個魚缸`;
   element("cloudRemoteCount").textContent = status.remote ? status.remote.records : "—";
   element("cloudRemoteTanks").textContent = status.remote ? `${status.remote.tanks} 個魚缸` : "尚未連線";
-  element("cloudAccount").textContent = session?.user.email || "";
+  element("cloudAccount").textContent = session ? "管理連線已建立" : "";
   element("cloudAccount").hidden = !session;
   element("cloudSetupNotice").hidden = configured && !connectionError;
   element("cloudSetupNotice").textContent = checkingSetup
     ? "正在確認雲端連線"
     : connectionError || "雲端後台尚未啟用，本機紀錄照常保留。";
   element("cloudAuthForm").hidden = !configured || Boolean(session);
+  element("cloudRetrySetupBtn").hidden = !connectionError || Boolean(session);
+  element("cloudRetrySetupBtn").disabled = checkingSetup || authBusy;
   root.querySelectorAll("#cloudAuthForm input, #cloudAuthForm button").forEach((input) => { input.disabled = authBusy; });
   element("cloudImportActions").hidden = status.phase !== "awaiting_import";
   element("uploadCloudBtn").disabled = busy || !status.local.tanks;

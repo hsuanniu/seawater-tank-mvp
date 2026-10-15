@@ -17,13 +17,13 @@
 - 趨勢圖表
 - 備份資料 / 還原資料
 - PWA，可從手機瀏覽器加入主畫面
-- Supabase 登入與雲端同步
+- 管理密碼登入與 Neon 雲端同步（選用）
 - localStorage 單機儲存
-- GPT 唯讀連接程式與設定指引（須先設定 Supabase、部署 Edge Function，並在專用 GPT 匯入 Action 才能使用）
+- GPT 唯讀 API 與設定指引（需完成一次後台設定，再在專用 GPT 匯入 Action）
 
 ## 本機使用
 
-直接用瀏覽器打開 `index.html` 即可。
+先執行 `npm ci` 安裝測試與後端依賴。前端使用 ES modules，請透過本機 HTTP 伺服器開啟。
 
 如果要用本機網址測試：
 
@@ -48,25 +48,27 @@ http://localhost:4179
 5. 連接你的 GitHub repository。
 6. 如果 Render 讀到 `render.yaml`，可直接依設定部署。
 7. 若手動設定：
-   - Build Command：`npm run build`
+   - Build Command：`npm ci && npm run build`
    - Publish Directory：`.`
 
 部署完成後，Render 會提供一個 `onrender.com` 網址。
 
-## Supabase 雲端同步
+## 管理密碼雲端同步
 
 若要像遊戲庫一樣讓 GPT 直接讀取資料，請依照 [雲端與 GPT 連接設定](GPT_CONNECTION.md)。入口位於「設定 → 雲端資料同步」。
 
-雲端同步保留同一份 TankStore 快照，按帳號隔離；部署時只設定一次公開連線資訊，手機不再要求填網址或金鑰。
+與遊戲庫採同樣的個人管理流程：管理密碼 → 首次匯入 → 自動同步 → GPT 唯讀。原本 Render Static Site 與手機網址保持不變；獨立 Vercel API 與 Neon 資料庫已透過既有 Vercel 整合建立，不需要使用者另行登入 Neon。
 
-1. 建立 Supabase 專案。
-2. 到 SQL Editor 執行 `supabase-schema.sql`。
-3. Render Environment 設定 `REEF_SUPABASE_URL`、`REEF_SUPABASE_PUBLISHABLE_KEY`，Build Command 使用 `npm run build`，重新部署。
-4. 在 App 的「雲端資料同步」登入或建立帳號。
+1. 後端專案：Vercel `reef-tank-cloud`，資料庫：獨立的 `reef-controller-db`，不改動遊戲庫專案。
+2. API 服務設定 `DATABASE_URL`、`REEF_ADMIN_TOKEN`、`REEF_GPT_READ_TOKEN`、`REEF_APP_ORIGIN`、`REEF_API_PUBLIC_URL`；秘密只存在伺服器與本機被忽略的私密設定檔。
+3. 前端從 `cloud-config.defaults.json` 取得公開 API 網址；`REEF_CLOUD_API_URL` 可覆寫，手機不填網址或金鑰。
+4. 在 App 的「雲端資料同步」輸入管理密碼，不必 Email 或建立會員帳號。
 5. 使用原本保存紀錄的手機，確認數量後按「首次匯入」。雲端已有資料時不允許再次匯入。
-6. 其他裝置登入後載入雲端；載入前會保留本機安全備份。
+6. 其他裝置使用同一管理密碼載入雲端；載入前會保留本機安全備份。
 
 啟用後，本機儲存會自動同步。更新會檢查雲端版本，防止舊裝置覆蓋新紀錄；離線修改仍保留在本機。
+
+完整部署與安全說明：[CLOUD_SETUP.md](CLOUD_SETUP.md)。舊 Supabase 模組、SQL 和 Edge Function 留作舊版相容參考；目前前端不再使用 Supabase 登入，也不會自動搬移或刪除其資料。
 
 ## 注意事項
 
@@ -77,4 +79,4 @@ http://localhost:4179
 - 清除瀏覽器資料可能會刪除紀錄
 - 建議定期使用「備份資料」保存紀錄
 - PWA 可加入手機主畫面；跨裝置同步仍需要先登入並完成雲端同步設定
-- 目前同步單位是「同一個登入帳號」，尚未提供多人共用同一魚缸的權限管理
+- 目前是一份個人魚缸資料庫，持有管理密碼的裝置都能讀寫全部魚缸；沒有多人權限分級
