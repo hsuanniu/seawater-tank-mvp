@@ -1,6 +1,6 @@
 {
   "name": "seawater-tank-mvp",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "displayName": "Seawater Tank",
   "private": true,
   "type": "module",
@@ -10,9 +10,11 @@
     "prebuild": "node scripts/generateVersionMetadata.mjs && node scripts/generateCloudConfig.mjs",
     "start": "node server/index.js",
     "test:cloud-bundle": "node scripts/checkCloudBundle.mjs",
+    "db:migrate:inventory": "node --env-file-if-exists=.env.local scripts/migrateReservoirs.mjs",
+    "lint:inventory": "node --check modules/reservoirModule.js && node --check engines/reservoirEngine.js && node --check migrations/001_reservoir_inventory.js && node --check server/reservoirRepository.js && node --check components/reservoirComponent.js && node --check scripts/migrateReservoirs.mjs",
     "lint:gpt": "node --check services/reefGptContextService.js && node --check services/reefGptApiService.js && node --check supabase/functions/reef-gpt/index.ts && node --check tests/reefGpt.test.mjs",
     "lint:cloud": "node --check services/cloudConfigService.js && node --check services/cloudSyncService.js && node --check services/adminCloudService.js && node --check components/cloudSyncComponent.js && node --check scripts/generateCloudConfig.mjs && node --check scripts/checkCloudBundle.mjs && node --check api/index.js && node --check server/index.js && node --check server/cloudHandler.js && node --check server/cloudRepository.js && node --check tests/cloudSync.test.mjs && node --check tests/adminCloud.test.mjs",
-    "build": "npm run lint && npm run lint:gpt && npm run lint:cloud && npm test",
+    "build": "npm run lint && npm run lint:gpt && npm run lint:cloud && npm run lint:inventory && npm test",
     "test": "node --test tests/*.test.mjs"
   },
   "dependencies": {

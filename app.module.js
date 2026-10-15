@@ -3,6 +3,7 @@ import { createAppVersionFooter } from "./components/appVersionFooter.js";
 import { renderCloudSyncView } from "./components/cloudSyncComponent.js";
 import { actionText, changeText, confidenceText, dailyDeltaText, doseSuggestionText, formatDoseSentence, primaryFocus } from "./components/dashboardModule.js?v=20260914-dosing-micro-adjust";
 import { createMeasurementSopController } from "./components/measurementSopComponent.js?v=20260617-sop-timer-fix";
+import { createReservoirController } from "./components/reservoirComponent.js";
 import { analyzeTank } from "./engines/analysisEngine.js?v=20260914-dosing-micro-adjust";
 import { additiveLabel, normalizeAdditiveLog } from "./modules/additiveLogModule.js?v=20260520-additive-feeding-log2";
 import { analyzeBioLoadReferences, WEEKDAYS } from "./modules/bioLoadModule.js?v=20260520-additive-feeding-log2";
@@ -22,8 +23,8 @@ import { loadJson, saveJson } from "./services/storageService.js";
 const STORAGE_KEY = "seawaterTankMvp.v4";
 const APP_VERSION_STORAGE_KEY = "seawaterTankAppVersion.v1";
 const FALLBACK_VERSION = {
-  version: "1.1.1",
-  current_version: "1.1.1",
+  version: "1.2.0",
+  current_version: "1.2.0",
   build_time: "2026-10-15T00:00:00+08:00",
 };
 const DEBUG_MODE = false;
@@ -99,6 +100,7 @@ const CloudSync = createCloudSyncController({
     if (failure && failure !== previousCloudFailure) showToast(failure);
     previousCloudFailure = failure;
     if (status.phase === "connected" && status.pending) scheduleCloudSave();
+    if (status.phase === "connected" && !status.pending && document.querySelector("#dosing").classList.contains("active")) void ReservoirInventory.refresh();
   },
 });
 
@@ -119,6 +121,24 @@ const MeasurementSop = createMeasurementSopController({
     const input = document.querySelector(`#waterForm [name="${parameter}"]`);
     if (input) input.value = "";
     delete measurementMethodDraft[parameter];
+  },
+  onToast: showToast,
+});
+
+const ReservoirInventory = createReservoirController({
+  root: document.querySelector("#reservoirInventory"),
+  getTankId: () => activeTank()?.id || null,
+  getClient: () => cloudSession ? adminCloudClient?.inventory : null,
+  ensureSynced: async () => {
+    if (!cloudSession || !CloudSync.getStatus().canPublish) throw new Error("LOCAL_SYNC_REQUIRED");
+    if (dosingAutoSaveTimer) {
+      window.clearTimeout(dosingAutoSaveTimer);
+      dosingAutoSaveTimer = null;
+      saveDosingFromForm({ silent: true });
+    }
+    window.clearTimeout(cloudSaveTimer);
+    if (CloudSync.getStatus().pending) await CloudSync.sync();
+    if (CloudSync.getStatus().pending || CloudSync.getStatus().phase !== "connected") throw new Error("LOCAL_SYNC_REQUIRED");
   },
   onToast: showToast,
 });
@@ -545,7 +565,10 @@ function saveDosingFromForm({ silent = false, rerenderForms = false } = {}) {
 function scheduleDosingAutoSave() {
   window.clearTimeout(dosingAutoSaveTimer);
   renderDosingSavedMeta("輸入中，準備自動儲存");
-  dosingAutoSaveTimer = window.setTimeout(() => saveDosingFromForm({ silent: true }), 650);
+  dosingAutoSaveTimer = window.setTimeout(() => {
+    dosingAutoSaveTimer = null;
+    saveDosingFromForm({ silent: true });
+  }, 650);
 }
 
 function dosingSavedText() {
@@ -1303,6 +1326,7 @@ function renderAll({ forms = true, cloud = true } = {}) {
     return;
   }
   activeTank();
+  if (document.querySelector("#dosing").classList.contains("active")) void ReservoirInventory.refresh();
   if (forms) renderForms();
   renderDashboard();
   renderAnalysis();
@@ -1384,7 +1408,7 @@ function switchPage(id, { updateRoute = true } = {}) {
     history.replaceState(null, "", `#${id}`);
   }
   if (id === "analysis") renderAnalysis();
-  if (id === "dosing") renderDosingSavedMeta();
+  if (id === "dosing") { renderDosingSavedMeta(); void ReservoirInventory.refresh(); }
   if (id === "tank") renderForms();
 }
 
@@ -1455,6 +1479,7 @@ async function setupCloudConnection() {
         cloudSession = null;
         window.clearTimeout(cloudSaveTimer);
         CloudSync.disconnect();
+        ReservoirInventory.invalidate();
         showToast("管理連線已到期，請重新輸入管理密碼。本機紀錄仍保留。");
       },
     });
@@ -1469,16 +1494,20 @@ async function setupCloudConnection() {
 
 async function connectCloudSession(session) {
   cloudSession = session;
+  ReservoirInventory.invalidate();
   if (!session) {
     CloudSync.disconnect();
+    ReservoirInventory.invalidate();
     return false;
   }
   cloudConnectionError = "";
   renderCloudStatus();
-  return CloudSync.connect({
+  const connected = await CloudSync.connect({
     ownerKey: cloudConfiguration.apiUrl + "::" + session.libraryId,
     repository: adminCloudClient.repository,
   });
+  if (document.querySelector("#dosing").classList.contains("active")) void ReservoirInventory.refresh();
+  return connected;
 }
 
 async function refreshCloudSession() {
@@ -1565,6 +1594,7 @@ async function signOutCloud() {
   window.clearTimeout(cloudSaveTimer);
   CloudSync.disconnect();
   cloudSession = null;
+  ReservoirInventory.invalidate();
   try {
     await adminCloudClient.signOut();
     showToast("已登出，暫停雲端同步。");
@@ -1573,6 +1603,12 @@ async function signOutCloud() {
 }
 
 function setupEvents() {
+  const refreshVisibleInventory = () => {
+    if (!document.hidden && document.querySelector("#dosing").classList.contains("active")) void ReservoirInventory.refresh();
+  };
+  document.addEventListener("visibilitychange", refreshVisibleInventory);
+  window.addEventListener("pageshow", refreshVisibleInventory);
+  window.addEventListener("focus", refreshVisibleInventory);
   document.querySelectorAll(".nav-link").forEach((button) => {
     button.addEventListener("click", () => switchPage(button.dataset.section));
   });

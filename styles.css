@@ -2800,3 +2800,56 @@ th {
     font-size: 10.5px;
   }
 }
+:root {
+  --reservoir-ok: #237c72;
+  --reservoir-warning: #a34d0b;
+}
+
+.reservoir-panel { margin-block: 20px; }
+.reservoir-heading, .reservoir-card-title, .reservoir-balance, .reservoir-caption { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.reservoir-heading { margin-bottom: 16px; }
+.reservoir-heading h3 { margin: 0; font-size: 20px; }
+.reservoir-heading p { margin: 6px 0 0; font-size: 13px; }
+.reservoir-heading button { flex: 0 0 auto; }
+.reservoir-list { display: grid; gap: 12px; min-width: 0; }
+.reservoir-card { background: #fff; border: 1px solid #d5e6e9; border-radius: 8px; min-width: 0; overflow: clip; }
+.reservoir-card > summary { padding: 16px; cursor: pointer; list-style: none; }
+.reservoir-card > summary::-webkit-details-marker { display: none; }
+.reservoir-card > summary::after { content: "展開管理"; display: block; margin-top: 10px; font-size: 13px; color: #146c7f; text-align: right; }
+.reservoir-card[open] > summary::after { content: "收合"; }
+.reservoir-card-title strong { font-size: 18px; }
+.reservoir-status { color: var(--reservoir-ok); font-size: 13px; font-weight: 650; }
+.reservoir-balance { margin-top: 14px; font-variant-numeric: tabular-nums; }
+.reservoir-balance > strong { font-size: 22px; overflow-wrap: anywhere; }
+.reservoir-balance small { color: #526c76; font-size: 14px; font-weight: 500; }
+.reservoir-balance > span { color: #425f69; white-space: nowrap; font-size: 15px; }
+.reservoir-card progress { display: block; width: 100%; height: 8px; margin: 12px 0; border: 0; border-radius: 4px; overflow: hidden; appearance: none; background: #e9f2f3; color: #278a83; }
+.reservoir-card progress::-webkit-progress-bar { background: #e9f2f3; }
+.reservoir-card progress::-webkit-progress-value { background: #278a83; }
+.reservoir-card progress::-moz-progress-bar { background: #278a83; }
+.reservoir-card.is-low { border-color: #edc49c; }
+.reservoir-card.is-low progress::-webkit-progress-value { background: #c67b25; }
+.reservoir-card.is-low progress::-moz-progress-bar { background: #c67b25; }
+.reservoir-card.is-low .reservoir-status { color: var(--reservoir-warning); }
+.reservoir-caption { flex-wrap: wrap; color: #526c76; font-size: 13px; }
+.reservoir-card-body { border-top: 1px solid #e5edef; padding: 16px; }
+.reservoir-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 10px; margin: 0 0 18px; }
+.reservoir-stats dt, .reservoir-times dt { color: #526c76; font-size: 13px; margin-bottom: 4px; }
+.reservoir-stats dd, .reservoir-times dd { margin: 0; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; font-size: 15px; }
+.reservoir-card form, .reservoir-add form { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; margin: 18px 0; }
+.reservoir-card label, .reservoir-add label { display: grid; gap: 7px; font-size: 14px; min-width: 0; }
+.reservoir-panel input, .reservoir-panel select { width: 100%; min-width: 0; height: 50px; box-sizing: border-box; font-size: 16px; }
+.reservoir-panel button { min-height: 48px; font-size: 15px; letter-spacing: 0; white-space: normal; }
+.reservoir-warning { background: #fff5e8; color: #87440c; border: 1px solid #efcfa8; }
+.reservoir-options, .reservoir-history, .reservoir-add { border-top: 1px solid #dfecee; padding-top: 12px; margin-top: 16px; }
+.reservoir-options > summary, .reservoir-history > summary, .reservoir-add > summary { min-height: 44px; padding-block: 10px; cursor: pointer; font-size: 15px; color: #285b6b; }
+.reservoir-actions { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+.reservoir-times { display: grid; gap: 12px; margin-top: 20px; }
+.reservoir-history ol { list-style: none; padding: 0; margin: 16px 0; }
+.reservoir-history li { border-bottom: 1px solid #e5edef; padding: 12px 0; }
+.reservoir-history li > div { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.reservoir-history time { color: #526c76; font-size: 13px; }
+.reservoir-history p { margin: 6px 0 0; font-size: 14px; }
+@media (min-width: 900px) {
+  .reservoir-list { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+}

@@ -11,6 +11,9 @@ export const GPT_DATA_POLICY = {
   inheritedValuesCanAdjustDosing: false,
   nutrientDosingAllowed: false,
   canControlEquipment: false,
+  inventoryCanChangeDosing: false,
+  mustReportReservoirWarnings: true,
+  nullRecommendationMeansNoAutomaticCalculation: true,
 };
 
 function taipeiDate(now) {
@@ -76,7 +79,7 @@ function recentEntries(entries = [], dateKey, now, fields) {
     .map((item) => Object.fromEntries(fields.filter((key) => item[key] !== undefined).map((key) => [key, item[key]])));
 }
 
-export function buildReefGptContext({ state, tankId, cloudUpdatedAt = null, now = new Date() }) {
+export function buildReefGptContext({ state, tankId, cloudUpdatedAt = null, reservoirs = [], inventoryCalculatedAt = null, now = new Date() }) {
   const tanks = ownedTanks(state);
   const data = tankId
     ? tanks.find((item) => item.id === tankId)
@@ -146,6 +149,15 @@ export function buildReefGptContext({ state, tankId, cloudUpdatedAt = null, now 
       autoCalculationPaused: Boolean(row.autoCalculationPaused),
     };
   });
+  const inventory = reservoirs.filter((r) => r.tankId === data.id).map((r) => {
+    const recommendation = recommendations.find((entry) => entry.parameter === r.doseKey);
+    const validDose = recommendation?.canAdjust === true && Number.isFinite(recommendation.suggestedDoseMlPerDay)
+      ? recommendation.suggestedDoseMlPerDay : null;
+    const suggestedDays = validDose > 0 && r.remainingMl !== null && !r.remainingIsUpperBound ? r.remainingMl / validDose : null;
+    return { ...r, daysAtApprovedSuggestedDose: suggestedDays,
+      approvedSuggestionInventoryWarning: suggestedDays !== null && suggestedDays < 7
+        ? `${r.name} 庫存不足以支持安全引擎建議量使用 7 天，請先補充或確認庫存；不可因此自行改變滴定量。` : null };
+  });
   return {
     schemaVersion: "1.0",
     generatedAt: now.toISOString(),
@@ -171,6 +183,12 @@ export function buildReefGptContext({ state, tankId, cloudUpdatedAt = null, now 
     previousMeasurement: measurementData(previous),
     recentMeasurements: records.slice(-8).reverse().map(measurementData),
     recommendations,
+    reservoirInventory: {
+      timeZone: "Asia/Taipei", calculatedAt: inventoryCalculatedAt,
+      defaultWarningThreshold: 80, reservoirs: inventory,
+      warnings: inventory.flatMap((r) => [r.warning, r.approvedSuggestionInventoryWarning].filter(Boolean)),
+      interpretation: "每次水質分析都須列出全部滴定桶庫存與警告。庫存是按已同步設定估算，除非 quality=actual；手動確認時間不是計算時間，也不是水質測量日期或同步時間。canAdjust=false 或 suggestedDoseMlPerDay=null 時不可產生新劑量，暫不計算不等於維持。庫存不足只提醒補充，不可自動改滴定。",
+    },
     referenceFactors: {
       events: recentEntries(data.events, ["event_start_date", "start_date", "date", "createdAt"], now, ["id", "type", "event_type", "date", "event_start_date", "start_date", "affected_element", "title", "note", "notes", "expected_recovery_days", "recovery_days"]),
       maintenance: recentEntries(data.maintenance, "date", now, ["date", "waterChangeCount", "waterChangeVolume", "newFish", "newCoral", "moreFeeding", "changedAdditive", "note"]),

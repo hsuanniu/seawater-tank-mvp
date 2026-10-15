@@ -2,10 +2,13 @@ import { createServer } from "node:http";
 import { neon } from "@neondatabase/serverless";
 import { createCloudRepository } from "./cloudRepository.js";
 import { cloudServerConfig, createReefCloudHandler, MAX_BODY_BYTES } from "./cloudHandler.js";
+import { createReservoirRepository } from "./reservoirRepository.js";
 
 const config = cloudServerConfig(process.env);
-const repository = process.env.DATABASE_URL ? createCloudRepository(neon(process.env.DATABASE_URL)) : null;
-const handler = createReefCloudHandler({ ...config, repository });
+const sql = process.env.DATABASE_URL ? neon(process.env.DATABASE_URL) : null;
+const repository = sql ? createCloudRepository(sql) : null;
+const inventory = sql ? createReservoirRepository(sql, repository) : null;
+const handler = createReefCloudHandler({ ...config, repository, inventory, cronSecret: process.env.CRON_SECRET });
 
 const server = createServer(async (incoming, outgoing) => {
   try {

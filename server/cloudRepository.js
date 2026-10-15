@@ -12,7 +12,7 @@ export function validCloudState(state) {
       || !tank.tank || typeof tank.tank !== "object" || Array.isArray(tank.tank)
       || !Array.isArray(tank.records) || !tank.records.every((row) => row && typeof row === "object" && !Array.isArray(row))) return false;
     ids.add(tank.id);
-    return ["archivedRecords", "maintenance", "doseApplications", "livestock", "additives", "additiveSchedules", "feedings", "events"]
+    return ["archivedRecords", "maintenance", "doseApplications", "livestock", "additives", "additiveSchedules", "feedings", "events", "dosingHistory"]
       .every((key) => tank[key] === undefined || Array.isArray(tank[key]));
   });
 }

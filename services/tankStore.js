@@ -2,6 +2,7 @@ import { DEFAULT_DOSING, mergeDosing } from "../modules/dosingModule.js";
 import { DEFAULT_TANK } from "../modules/tankModule.js";
 import { splitActiveAndArchivedRecords } from "./retentionService.js";
 import { clone, createId, loadJson, saveJson } from "./storageService.js";
+import { dosingChanges } from "../modules/reservoirModule.js";
 
 export function createTankStore({ storageKey, onChange = () => {}, onDosingDebug = null, onPersist = () => {}, onPersistError = () => {} }) {
   let state = loadState(storageKey);
@@ -38,6 +39,7 @@ export function createTankStore({ storageKey, onChange = () => {}, onDosingDebug
       id: overrides.id || createId(),
       tank: overrides.tank || { name: overrides.name || DEFAULT_TANK.name },
       dosing: overrides.dosing,
+      dosingHistory: overrides.dosingHistory,
       records: overrides.records,
       archivedRecords: overrides.archivedRecords,
       maintenance: overrides.maintenance,
@@ -79,6 +81,7 @@ export function createTankStore({ storageKey, onChange = () => {}, onDosingDebug
         },
       },
       records: retained.activeRecords,
+      dosingHistory: Array.isArray(stored.dosingHistory) ? stored.dosingHistory : [],
       archivedRecords: retained.archivedRecords,
       maintenance: Array.isArray(stored.maintenance) ? stored.maintenance : [],
       doseApplications: Array.isArray(stored.doseApplications) ? stored.doseApplications : [],
@@ -99,6 +102,7 @@ export function createTankStore({ storageKey, onChange = () => {}, onDosingDebug
         id: tank.id,
         tank: tank.tank,
         dosing: tank.dosing,
+        dosingHistory: tank.dosingHistory || [],
         records: tank.records,
         archivedRecords: tank.archivedRecords || [],
         maintenance: tank.maintenance,
@@ -263,6 +267,9 @@ export function createTankStore({ storageKey, onChange = () => {}, onDosingDebug
       const tankData = getActiveTank();
       const previous = clone(tankData.dosing);
       tankData.dosing = mergeDosing(tankData.dosing, nextDosing);
+      tankData.dosingHistory.push(...dosingChanges(previous, tankData.dosing, {
+        at: new Date().toISOString(), createId, source,
+      }));
       persist();
       notify({ forms, statusPrefix, partial: true });
       if (debug && onDosingDebug) onDosingDebug({ source, input: nextDosing, previous, updated: tankData.dosing });

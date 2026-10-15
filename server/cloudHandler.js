@@ -32,13 +32,13 @@ export function cloudServerConfig(env) {
   return { adminPassword, readToken, appOrigin, publicUrl };
 }
 
-export function createReefCloudHandler({ repository, adminPassword = "", readToken = "", appOrigin, publicUrl, now = () => Date.now() }) {
+export function createReefCloudHandler({ repository, inventory = null, cronSecret = "", adminPassword = "", readToken = "", appOrigin, publicUrl, now = () => Date.now() }) {
   if (adminPassword && (adminPassword.length < 32 || adminPassword.length > 1024)) throw new Error("INVALID_ADMIN_TOKEN");
   if (readToken && (readToken.length < 32 || readToken === adminPassword)) throw new Error("INVALID_READ_TOKEN");
   const authVersion = hashToken(adminPassword);
   const allowedOrigins = new Set([appOrigin, new URL(publicUrl).origin].filter(Boolean));
   const gptBase = `${publicUrl}/api/gpt`;
-  const gpt = createReefGptHandler({ token: readToken, ownerUserId: repository ? "personal" : "", loadOwnedState: () => repository.load(), baseUrl: gptBase, now: () => new Date(now()) });
+  const gpt = createReefGptHandler({ token: readToken, ownerUserId: repository ? "personal" : "", loadOwnedState: () => inventory ? inventory.contextState() : repository.load(), baseUrl: gptBase, now: () => new Date(now()) });
   let attempts = 0;
   let attemptWindow = now();
 
@@ -48,11 +48,18 @@ export function createReefCloudHandler({ repository, adminPassword = "", readTok
     if (url.pathname === "/healthz" && request.method === "GET") return json({ status: "ok" });
     if (url.pathname === "/api/openapi" && request.method === "GET") return json(reefGptOpenApi(gptBase));
     if (url.pathname.startsWith("/api/gpt/")) return gpt(request);
+    if (url.pathname === "/api/internal/reservoirs/reconcile") {
+      if (request.method !== "GET") return json({ error: "METHOD_NOT_ALLOWED" }, 405);
+      if (!cronSecret || !matchesPassword(request.headers.get("authorization"), `Bearer ${cronSecret}`)) return json({ error: "UNAUTHORIZED" }, 401);
+      if (!inventory) return json({ error: "CONNECTION_NOT_CONFIGURED" }, 503);
+      return json(await inventory.reconcile());
+    }
+    const inventoryPath = url.pathname.match(/^\/api\/internal\/reservoirs\/([^/]+)(?:\/(operations)|\/([^/]+)\/history(?:\/(\d+))?)?$/);
     const sessionPath = url.pathname === "/api/internal/session";
     const statePath = url.pathname === "/api/internal/state";
     const initializePath = url.pathname === "/api/internal/initialize";
-    if (!sessionPath && !statePath && !initializePath) return json({ error: "NOT_FOUND" }, 404);
-    const methods = sessionPath ? ["GET", "POST", "DELETE"] : statePath ? ["GET", "PUT"] : ["POST"];
+    if (!sessionPath && !statePath && !initializePath && !inventoryPath) return json({ error: "NOT_FOUND" }, 404);
+    const methods = inventoryPath ? [inventoryPath[2] ? "POST" : "GET"] : sessionPath ? ["GET", "POST", "DELETE"] : statePath ? ["GET", "PUT"] : ["POST"];
     if (!methods.includes(request.method)) return json({ error: "METHOD_NOT_ALLOWED" }, 405);
     const ready = Boolean(repository && adminPassword);
     if (sessionPath && request.method === "GET") {
@@ -70,6 +77,13 @@ export function createReefCloudHandler({ repository, adminPassword = "", readTok
     }
     const sessionToken = bearer(request);
     if (!await repository.hasSession(sessionToken, authVersion)) return json({ error: "SESSION_EXPIRED" }, 401);
+    if (inventoryPath) {
+      if (!inventory) return json({ error: "CONNECTION_NOT_CONFIGURED" }, 503);
+      const tankId = decodeURIComponent(inventoryPath[1]);
+      if (inventoryPath[2]) return json(await inventory.operate(tankId, await readJson(request)));
+      if (inventoryPath[3]) return json(await inventory.history(tankId, decodeURIComponent(inventoryPath[3]), inventoryPath[4]));
+      return json(await inventory.list(tankId));
+    }
     if (sessionPath) {
       await repository.revokeSession(sessionToken);
       return json({ signedOut: true });
@@ -88,7 +102,10 @@ export function createReefCloudHandler({ repository, adminPassword = "", readTok
       else response = await route(request);
     } catch (error) {
       const code = error.message;
-      const status = ({ INVALID_JSON: 400, INVALID_CLOUD_STATE: 400, UNSUPPORTED_MEDIA_TYPE: 415, PAYLOAD_TOO_LARGE: 413, CLOUD_ALREADY_INITIALIZED: 409, CLOUD_REVISION_CONFLICT: 409 })[code] || 503;
+      const status = ({ INVALID_JSON: 400, INVALID_CLOUD_STATE: 400, UNSUPPORTED_MEDIA_TYPE: 415, PAYLOAD_TOO_LARGE: 413, CLOUD_ALREADY_INITIALIZED: 409, CLOUD_REVISION_CONFLICT: 409,
+        INVALID_INVENTORY_INPUT: 400, INVALID_INVENTORY_TIME: 400, INVALID_EXECUTION_COVERAGE: 400, INVENTORY_CAPACITY_EXCEEDED: 400,
+        INVENTORY_CONFIRMATION_REQUIRED: 409, DOSE_LINK_ALREADY_EXISTS: 409, INVENTORY_LIMIT_REACHED: 409,
+        IDEMPOTENCY_KEY_REUSED: 409, INVENTORY_CONFLICT_RETRY: 409, TANK_NOT_FOUND: 404, RESERVOIR_NOT_FOUND: 404, NO_SYNCED_DATA: 404 })[code] || 503;
       response = json({ error: status === 503 ? "CLOUD_UNAVAILABLE" : code }, status);
     }
     const headers = new Headers(response.headers);

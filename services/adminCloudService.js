@@ -50,5 +50,10 @@ export function createAdminCloudClient({ apiUrl, fetchImpl = fetch, storage = lo
       initialize: (data) => request("/api/internal/initialize", { method: "POST", body: { data } }),
       save: (data, revision) => request("/api/internal/state", { method: "PUT", body: { data, expectedRevision: revision } }),
     },
+    inventory: {
+      list: (tankId) => request(`/api/internal/reservoirs/${encodeURIComponent(tankId)}`),
+      operate: (tankId, operation) => request(`/api/internal/reservoirs/${encodeURIComponent(tankId)}/operations`, { method: "POST", body: operation }),
+      history: (tankId, reservoirId, cursor) => request(`/api/internal/reservoirs/${encodeURIComponent(tankId)}/${encodeURIComponent(reservoirId)}/history${cursor ? `/${encodeURIComponent(cursor)}` : ""}`),
+    },
   };
 }
