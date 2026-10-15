@@ -294,3 +294,14 @@ test("GPT reports supply risk only for an actual engine-approved suggestion and 
   assert.equal(inherited.reservoirInventory.reservoirs[0].daysAtApprovedSuggestedDose, null);
   assert.equal(inherited.reservoirInventory.reservoirs[0].approvedSuggestionInventoryWarning, null);
 });
+
+test("Inventory audit sorts numeric sequences correctly beyond nine entries", async () => {
+  const r = await kh();
+  await op(r.id, "calibrate", { amountMl: 100 });
+  for (let i = 0; i < 12; i += 1) await op(r.id, "refill", { amountMl: 1 });
+  const page = await inventory.history("tank-1", r.id);
+  const sequences = page.entries.map((e) => BigInt(e.sequence));
+  assert.ok(sequences.every((value, i) => i === 0 || value < sequences[i - 1]));
+  const earlier = await inventory.history("tank-1", r.id, page.entries[4].sequence);
+  assert.equal(earlier.entries[0].sequence, page.entries[5].sequence);
+});

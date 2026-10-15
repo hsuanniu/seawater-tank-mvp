@@ -179,7 +179,7 @@ export function createReservoirRepository(sql, cloudRepository, { now = () => Da
       if (!current.data?.tanks.some((t) => t.id === tankId)) throw new Error("TANK_NOT_FOUND");
       const rows = await sql`SELECT sequence::text, id, type, occurred_at, local_date::text, source, amount_ml, before_ml, after_ml, metadata
         FROM reservoir_transactions WHERE tank_id = ${tankId} AND reservoir_id = ${reservoirId} AND sequence < ${before}::bigint
-        ORDER BY sequence DESC LIMIT 101`;
+        ORDER BY reservoir_transactions.sequence DESC LIMIT 101`;
       const entries = rows.slice(0, 100);
       return { entries, nextCursor: rows.length > 100 ? entries.at(-1).sequence : null };
     },
