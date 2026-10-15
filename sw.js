@@ -1,4 +1,4 @@
-const CACHE_NAME = "seawater-tank-mvp-v44";
+const CACHE_NAME = "seawater-tank-mvp-v45";
 const APP_SHELL = [
   "./",
   "index.html",

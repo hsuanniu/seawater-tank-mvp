@@ -275,6 +275,47 @@ button {
   max-width: 420px;
 }
 
+.settings-advanced > summary {
+  min-height: 52px;
+  padding-block: 8px;
+  color: var(--ink);
+  font-size: 16px;
+  font-weight: 800;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.settings-advanced > summary::marker {
+  color: var(--blue-strong);
+}
+
+.settings-advanced > summary:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 4px;
+  border-radius: 8px;
+}
+
+.settings-advanced > summary span {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.settings-advanced-content {
+  display: grid;
+  gap: 16px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+.settings-advanced-content h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
 .backup-actions .ghost-button {
   min-height: 34px;
   padding: 7px 10px;
@@ -282,6 +323,14 @@ button {
   background: rgba(255, 255, 255, 0.92);
   color: #425a68;
   font-size: 13px;
+}
+
+.settings-advanced .backup-actions .ghost-button {
+  display: flex;
+  min-height: 48px;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
 }
 
 .app-feedback {
