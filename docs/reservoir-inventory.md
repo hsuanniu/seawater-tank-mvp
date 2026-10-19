@@ -63,6 +63,14 @@ The existing weekly-focus card consumes the same inventory-controller snapshot a
 
 Both home and dosing pages refresh through the existing authenticated inventory client on navigation, foreground return and completed cloud sync. Refill/calibration responses publish directly to both views. A local dose that does not match the last server snapshot produces a data-update prompt rather than an old day estimate; the completed sync fetches a new forecast using the existing historical consumption timeline. Stopped/zero-dose reservoirs do not generate depletion reminders. Unknown stock/rates, failed reads and unconfirmed operations never become zero stock or a normal status. No new API, migration, notification channel or dosing mutation is introduced. `tests/reservoirFocus.test.mjs` covers presentation, thresholds, selected-tank isolation and the repository's refill/calibration/piecewise-dose update behavior.
 
+### Inventory Reliability (1.5.2)
+
+An unconfirmed operation now identifies its tank/reservoir in the internal UI snapshot. Only that reservoir's current forecast is withheld; other known urgent warnings remain visible. An operation on a different tank cannot hide the selected tank's warnings. A failed read, offline state or inventory calculation at least 15 minutes old shows the last calculation time in Asia/Taipei; cached warnings are explicitly labeled as previous estimates, never fresh measurements. A minute timer only updates this display, without fetching or deducting inventory. Fresh/normal inventory still adds no extra home UI. Positive forecasts below one day use “不足 1 天” in both existing views; classification still uses the unchanged raw-day engine rules.
+
+Inventory fetching is independent of form drafts. Draft fields, correction revision tokens and expanded sections are preserved in memory per tank/form while data refreshes. Focused inputs remain editable during a read; successful writes clear only their submitted form. Explicitly confirmed “更新” still discards drafts. Drafts do not change saved stock or dosing until submitted.
+
+Daily consumption audit comparison now compares the seven numeric totals rather than JSON serialization order. Repeated same-time reads do not append zero-change audit entries just because PostgreSQL JSONB reordered keys. Changes to demand, device/estimated breakdown or gap duration still produce audit history even if consumed mL is zero. Existing audit entries, including older zero entries, are not removed. REST/MCP routes, authentication, full water/dosing/manual histories, pagination and all safety/alert rules remain unchanged. No database migration is needed.
+
 Run `npm test`, `npm run build`, then `vercel build --prod` and `npm run test:cloud-bundle` before deploying. `tests/reservoir.test.mjs` covers pure replay and real PostgreSQL semantics through PGlite. Never run calibration/refill fixtures against production.
 
 ## Refill, Calibration and Correction History (1.5.0)

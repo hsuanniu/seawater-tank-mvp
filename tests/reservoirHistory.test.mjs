@@ -258,6 +258,26 @@ test("Capacity reduction with explicit stock confirmation remains a separate cal
   assert.equal(r.calibrationHistory[0].reason, "修改容量時確認實際剩餘量");
 });
 
+test("JSONB key order never creates duplicate zero audits, but meaningful zero-stock changes and old records remain", async () => {
+  const r = await kh();
+  await operation(r.id, "calibrate", { amountMl: 0 }, "empty-baseline");
+  clock += 12 * 3600000;
+  await inventory.list("reef");
+  await db.query(`INSERT INTO reservoir_transactions(id,tank_id,reservoir_id,type,occurred_at,local_date,source,amount_ml,before_ml,after_ml,metadata)
+    SELECT 'legacy-zero',tank_id,reservoir_id,'consumption_correction',occurred_at,local_date,source,0,before_ml,after_ml,metadata
+    FROM reservoir_transactions WHERE type='consumption' LIMIT 1`);
+  const original = (await db.query("SELECT * FROM reservoir_transactions ORDER BY sequence")).rows;
+  for (let i = 0; i < 3; i++) assert.equal((await kh()).remainingMl, 0);
+  assert.deepEqual((await db.query("SELECT * FROM reservoir_transactions ORDER BY sequence")).rows, original);
+  assert.ok((await inventory.history("reef", r.id)).entries.some(entry => entry.id === "legacy-zero"));
+  clock += 6 * 3600000;
+  await inventory.list("reef");
+  const additions = (await db.query("SELECT amount_ml,metadata FROM reservoir_transactions WHERE sequence > $1", [original.at(-1).sequence])).rows;
+  assert.equal(additions.length, 1);
+  assert.equal(Number(additions[0].amount_ml), 0);
+  assert.equal(additions[0].metadata.dailyTotal.demandedMl, 15);
+});
+
 test("Existing authenticated API exposes full histories without granting GPT write permissions", async () => {
   const r = await kh();
   await operation(r.id, "calibrate", { amountMl: 200, reason: "量筒確認" }, "initial");

@@ -6,6 +6,7 @@ import { evaluateReservoirAvailability } from "../engines/reservoirAlertEngine.j
 import { reservoirDose, dosingChanges } from "../modules/reservoirModule.js";
 import { createCloudRepository } from "../server/cloudRepository.js";
 import { createReservoirRepository } from "../server/reservoirRepository.js";
+import { formatReservoirDays, inventoryFreshness, INVENTORY_FRESHNESS_MS } from "../services/reservoirDisplayService.js";
 
 const dosing = { kh: 10, ca: 4, mg: 0.4, aplus: 0.4, kplus: 0.2, status: {} };
 const row = (key, remainingMl, options = {}, settings = dosing) => {
@@ -14,7 +15,7 @@ const row = (key, remainingMl, options = {}, settings = dosing) => {
   return { ...value, ...evaluateReservoirAvailability(value) };
 };
 const messages = (rows, options = {}) => reservoirFocusMessages({ tankId: "reef", dosing,
-  snapshot: { tankId: "reef", connected: true, result: { reservoirs: rows } }, ...options });
+  snapshot: { tankId: "reef", connected: true, result: { reservoirs: rows, calculatedAt: new Date().toISOString() } }, ...options });
 
 test("Home hides normal inventory even at low percent and preserves the API's custom day thresholds", () => {
   assert.deepEqual(messages([row("mg", 100, { percentage: 6.67 })]), []);
@@ -56,11 +57,57 @@ test("Missing stock, invalid rate, gaps, failed fetches and unsynced rate change
   const invalidDose = { ...dosing, kh: "" };
   assert.equal(messages([row("kh", 100, {}, invalidDose)], { dosing: invalidDose })[0].level, "needs_confirmation");
   assert.equal(messages([row("kh", 100)], { dosing: { ...dosing, kh: 20 } })[0].level, "needs_confirmation");
-  for (const patch of [{ error: "NETWORK" }, { pending: true }, { connected: false }, { result: null }, { result: {} }]) {
-    const result = reservoirFocusMessages({ tankId: "reef", dosing, snapshot: { tankId: "reef", connected: true, result: { reservoirs: [row("kh", 10)] }, ...patch } });
+  for (const patch of [{ connected: false }, { result: null }, { result: {} }]) {
+    const result = reservoirFocusMessages({ tankId: "reef", dosing, snapshot: { tankId: "reef", connected: true, result: { reservoirs: [row("kh", 10)], calculatedAt: new Date().toISOString() }, ...patch } });
     assert.equal(result[0].level, "needs_confirmation");
     assert.doesNotMatch(result[0].text, /正常|預估耗盡|預估剩 \d/);
   }
+});
+
+test("Unconfirmed operations affect only their reservoir and never hide other urgent tanks or buckets", () => {
+  const snapshot = { tankId: "reef", connected: true, error: "operation failed", refreshError: "", pending: true,
+    pendingOperation: { tankId: "reef", reservoirId: "ca", type: "refill" },
+    result: { reservoirs: [row("kh", 0), row("ca", 0)], calculatedAt: new Date().toISOString() } };
+  let result = messages([], { snapshot });
+  assert.match(result[0].text, /KH 滴定液預估耗盡/);
+  assert.doesNotMatch(result[0].text, /CA|上次估算/);
+  assert.ok(result.some(e => /CA 操作待確認/.test(e.text)));
+  result = messages([], { snapshot: { ...snapshot, pendingOperation: { ...snapshot.pendingOperation, tankId: "other" } } });
+  assert.equal(result.length, 1);
+  assert.match(result[0].text, /KH/);
+  assert.match(result[0].text, /CA/);
+  result = messages([], { snapshot: { ...snapshot, pendingOperation: { tankId: "reef", type: "create", reservoirId: null } } });
+  assert.equal(result[0].level, "urgent");
+  assert.ok(result.some(e => /操作待確認/.test(e.text)));
+});
+
+test("Less than one day is not rounded to zero or incorrectly called depleted", () => {
+  for (const value of [0.0001, 0.04, 0.5, 0.9999]) assert.equal(formatReservoirDays(value), "不足 1 天");
+  assert.equal(formatReservoirDays(1), "1 天");
+  assert.equal(formatReservoirDays(null), null);
+  const text = messages([row("kh", 0.1)])[0].text;
+  assert.match(text, /預估不足 1 天/);
+  assert.doesNotMatch(text, /耗盡|剩 0 天/);
+});
+
+test("Stale and offline inventory shows Taiwan calculation time and labels cached warnings as previous estimates", () => {
+  const now = Date.parse("2026-10-20T00:10:00+08:00");
+  const calculatedAt = new Date(now - INVENTORY_FRESHNESS_MS).toISOString();
+  assert.equal(inventoryFreshness({ calculatedAt, now: now - 1 }).stale, false);
+  assert.equal(inventoryFreshness({ calculatedAt, now }).stale, true);
+  const snapshot = { tankId: "reef", connected: true, result: { reservoirs: [row("kh", 10)], calculatedAt } };
+  let result = messages([], { snapshot, now });
+  assert.match(result[0].text, /^上次估算：/);
+  assert.match(result.at(-1).text, /2026\/10\/19\s+23:55/);
+  result = messages([], { snapshot: { ...snapshot, result: { ...snapshot.result, calculatedAt: new Date(now).toISOString() } }, now, online: false });
+  assert.match(result.at(-1).text, /目前離線.*2026\/10\/20\s+00:10/);
+  result = messages([], { snapshot: { ...snapshot, refreshError: "network" }, now });
+  assert.match(result.at(-1).text, /庫存更新失敗/);
+  assert.equal(result[0].level, "urgent");
+  result = messages([], { snapshot: { ...snapshot, result: { reservoirs: [row("kh", 500)], calculatedAt } }, now });
+  assert.equal(result.length, 1);
+  assert.match(result[0].text, /已過期/);
+  assert.doesNotMatch(result[0].text, /正常/);
 });
 
 test("Home uses only the selected tank and safely escapes names in compact links", () => {
@@ -111,8 +158,10 @@ test("Shared repository updates home after refill, calibration and dose changes 
     assert.equal(result.reservoirs[0].estimatedDaysRemaining, 1.5);
     const consumption = async () => (await db.query("SELECT COALESCE(SUM(amount_ml),0)::numeric AS total FROM reservoir_transactions WHERE type IN ('consumption','consumption_correction','execution_reconciliation')")).rows[0].total;
     const before = await consumption();
+    const audit = (await db.query("SELECT * FROM reservoir_transactions ORDER BY sequence")).rows;
     assert.equal((await inventory.list("reef")).reservoirs[0].remainingMl, 30);
     assert.equal(await consumption(), before);
+    assert.deepEqual((await db.query("SELECT * FROM reservoir_transactions ORDER BY sequence")).rows, audit);
     assert.equal((await cloud.load()).data.tanks[0].dosing.kh, 20);
   } finally { await db.close(); }
 });

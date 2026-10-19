@@ -9,6 +9,9 @@ import { applyReservoirOperation, calculateReservoir, createReservoir, ingestDos
 const fingerprint = (value) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const iso = (value) => new Date(value).toISOString();
 const safeId = (value) => typeof value === "string" && /^[a-zA-Z0-9_-]{1,100}$/.test(value);
+const consumptionFields = ["consumedMl", "demandedMl", "estimatedMl", "actualMl", "gapSeconds", "estimatedSeconds", "actualSeconds"];
+// PostgreSQL JSONB does not preserve key order. Compare the actual totals, not serialized objects.
+const sameConsumption = (a, b) => consumptionFields.every((key) => (a?.[key] ?? 0) === (b?.[key] ?? 0));
 
 function auditSnapshot(view) {
   const { refillHistory, calibrationHistory, lastRefill, ...snapshot } = view;
@@ -93,7 +96,7 @@ export function createReservoirRepository(sql, cloudRepository, { now = () => Da
         const previousBaselineId = old.manualEvents.findLast((e) => e.type === "calibrate")?.id;
         for (const [date, bucket] of Object.entries(r.dailyConsumption)) {
           const before = baselineId === previousBaselineId ? old.dailyConsumption?.[date] : null;
-          if (JSON.stringify(bucket) !== JSON.stringify(before || { consumedMl: 0, demandedMl: 0, estimatedMl: 0, actualMl: 0, gapSeconds: 0, estimatedSeconds: 0, actualSeconds: 0 })) {
+          if (!sameConsumption(bucket, before)) {
             ledger.push(transaction(r, before ? "consumption_correction" : "consumption", at, {
               local_date: date, amount_ml: inventoryRound(bucket.consumedMl - (before?.consumedMl || 0)),
               metadata: { baselineId, dailyTotal: bucket, previousDailyTotal: before || null, note: "Asia/Taipei；按生效時間分段；估算以已同步設定為準" },
@@ -111,7 +114,7 @@ export function createReservoirRepository(sql, cloudRepository, { now = () => Da
           // A late device batch can correct prior estimates without changing any dosing setting.
           if (["execution", "correct"].includes(operation.type)) for (const [date, bucket] of Object.entries(r.dailyConsumption)) {
             const before = beforeDaily[date];
-            if (JSON.stringify(before) !== JSON.stringify(bucket)) ledger.push(transaction(r, operation.type === "execution" ? "execution_reconciliation" : "consumption_correction", at, { local_date: date,
+            if (!sameConsumption(before, bucket)) ledger.push(transaction(r, operation.type === "execution" ? "execution_reconciliation" : "consumption_correction", at, { local_date: date,
               amount_ml: inventoryRound(bucket.consumedMl - (before?.consumedMl || 0)), metadata: { baselineId, dailyTotal: bucket, previousDailyTotal: before || null,
                 source: operation.type === "execution" ? "device_complete_coverage" : "manual_history_correction", correctionId: operation.type === "correct" ? operation.idempotencyKey : null } }));
           }

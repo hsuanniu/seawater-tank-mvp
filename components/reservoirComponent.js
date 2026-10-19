@@ -1,9 +1,10 @@
 import { escapeHtml } from "../services/formatService.js";
 import { MAX_RESERVOIR_CAPACITY_ML } from "../modules/reservoirModule.js";
 import { validReservoirAlertDays } from "../engines/reservoirAlertEngine.js";
+import { formatReservoirDays } from "../services/reservoirDisplayService.js";
+import { captureReservoirDrafts, restoreReservoirDrafts, reservoirFormKey } from "./reservoirDraftModule.js";
 
 const n = (v) => v === null || v === undefined || !Number.isFinite(Number(v)) ? "—" : Number(v).toLocaleString("zh-TW", { maximumFractionDigits: 2 });
-const dayText = (v) => Number(v).toLocaleString("zh-TW", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const date = (v) => v ? new Date(v).toLocaleString("zh-TW", { timeZone: "Asia/Taipei", hour12: false }) : "尚未設定";
 const labels = { create: "建立滴定桶", calibrate: "人工校正", refill: "添加滴定液", correct: "更正歷史紀錄", capacity: "修改容量", threshold: "修改天數門檻", reserve: "修改桶底保留量",
   tracking: "庫存追蹤啟停", delete: "移除滴定桶", consumption: "每日消耗", consumption_correction: "消耗重新核算", execution: "裝置執行紀錄", execution_reconciliation: "實際消耗核對" };
@@ -36,8 +37,8 @@ export function renderReservoirManualHistory(r, disabled = false) {
         <p class="muted">添加／校正前：${escapeHtml(quality(entry.beforeQuality))}</p>
         ${entry.notes ? `<p>備註：${escapeHtml(entry.notes)}</p>` : ""}${entry.reason ? `<p>原因：${escapeHtml(entry.reason)}</p>` : ""}
         ${entry.corrected ? `<p>更正後${label}量 ${n(entry.effectiveAmountMl)} mL${entry.effectiveNotes ? ` · ${escapeHtml(entry.effectiveNotes)}` : ""}</p>
-          <details><summary>更正痕跡</summary><ol>${entry.corrections.map((c) => `<li><time>${escapeHtml(date(c.recordedAt))}</time><p>${n(c.previousAmountMl)} → ${n(c.amountMl)} mL</p><p>${escapeHtml(c.reason)}</p><p>更正當下存量 ${n(c.beforeRemainingMl)} → ${n(c.afterRemainingMl)} mL</p></li>`).join("")}</ol></details>` : ""}
-        <details class="reservoir-options"><summary>更正此紀錄</summary><form data-inventory-type="correct" data-id="${r.id}">
+          <details data-inventory-panel="${r.id}-${type}-${entry.id}-audit"><summary>更正痕跡</summary><ol>${entry.corrections.map((c) => `<li><time>${escapeHtml(date(c.recordedAt))}</time><p>${n(c.previousAmountMl)} → ${n(c.amountMl)} mL</p><p>${escapeHtml(c.reason)}</p><p>更正當下存量 ${n(c.beforeRemainingMl)} → ${n(c.afterRemainingMl)} mL</p></li>`).join("")}</ol></details>` : ""}
+        <details class="reservoir-options" data-inventory-panel="${r.id}-${type}-${entry.id}-correct"><summary>更正此紀錄</summary><form data-inventory-type="correct" data-id="${r.id}">
           <input type="hidden" name="targetEventId" value="${escapeHtml(entry.id)}"><input type="hidden" name="targetType" value="${type}"><input type="hidden" name="expectedRevisionId" value="${escapeHtml(entry.revisionId)}">
           <label>正確的${label}量 mL<input name="amountMl" type="number" inputmode="decimal" min="${type === "refill" ? "0.000001" : "0"}" max="${MAX_RESERVOIR_CAPACITY_ML}" step="any" value="${entry.effectiveAmountMl}" required ${disabled ? "disabled" : ""}></label>
           <label>備註<input name="notes" maxlength="1000" value="${escapeHtml(entry.effectiveNotes)}" ${disabled ? "disabled" : ""}></label>
@@ -48,9 +49,11 @@ export function renderReservoirManualHistory(r, disabled = false) {
 }
 
 export function createReservoirController({ root, getTankId, getClient, ensureSynced, onToast, onChange = () => {} }) {
-  let tankId = null, result = null, busy = false, error = "", requestVersion = 0, invalidated = false;
+  let tankId = null, result = null, busy = false, error = "", refreshError = "", requestVersion = 0, invalidated = false;
+  let renderedTankId = null;
   let pending = null;
   const history = new Map();
+  const drafts = new Map();
   const storageKey = "seawaterTankPendingInventory.v1";
   try { pending = JSON.parse(localStorage.getItem(storageKey)); } catch { /* A pending retry never changes tank records. */ }
 
@@ -59,9 +62,28 @@ export function createReservoirController({ root, getTankId, getClient, ensureSy
     try { value ? localStorage.setItem(storageKey, JSON.stringify(value)) : localStorage.removeItem(storageKey); } catch { /* In-memory retry still retains its idempotency key. */ }
   }
 
-  function render() {
-    const open = new Set([...root.querySelectorAll("details[open][data-reservoir]")].map((el) => el.dataset.reservoir));
-    const expandedHistory = new Set([...root.querySelectorAll("details[open][data-history-key]")].map((el) => el.dataset.historyKey));
+  function publish() {
+    onChange({ tankId, result, busy, error, refreshError, pending: Boolean(pending),
+      pendingOperation: pending ? { tankId: pending.tankId, reservoirId: pending.operation?.reservoirId || null, type: pending.operation?.type } : null,
+      connected: Boolean(getClient()) });
+  }
+
+  function render({ discardDrafts = false, clearOperation = null } = {}) {
+    if (renderedTankId) {
+      const captured = captureReservoirDrafts(root);
+      const previous = drafts.get(renderedTankId);
+      const forms = new Map(previous?.forms);
+      for (const key of captured.formKeys) forms.delete(key);
+      for (const [key, values] of captured.forms) forms.set(key, values);
+      const openPanels = new Set([...(previous?.openPanels || [])].filter((key) => !captured.panelKeys.has(key)));
+      for (const key of captured.openPanels) openPanels.add(key);
+      drafts.set(renderedTankId, { ...captured, forms, openPanels });
+    }
+    if (discardDrafts) drafts.delete(tankId);
+    if (clearOperation?.tankId) drafts.get(clearOperation.tankId)?.forms.delete(reservoirFormKey(
+      clearOperation.type, clearOperation.reservoirId, clearOperation.targetEventId));
+    const draft = drafts.get(tankId);
+    const open = draft?.openPanels || new Set();
     const rows = result?.reservoirs || [];
     root.innerHTML = `
       <div class="reservoir-heading"><div><h3>滴定桶庫存管理</h3><p class="muted">${result ? `計算 ${escapeHtml(date(result.calculatedAt))}` : "依已同步的有效滴定量估算"}</p></div>
@@ -71,21 +93,22 @@ export function createReservoirController({ root, getTankId, getClient, ensureSy
       ${error ? `<p class="notice reservoir-warning" role="alert">${escapeHtml(error)}</p>` : ""}
       ${pending ? `<div class="notice reservoir-warning"><p>有一筆操作尚未確認結果，請先重試。重試不會重複入帳。</p><button type="button" class="ghost-button" data-inventory-action="retry" ${busy ? "disabled" : ""}>確認上一筆操作</button></div>` : ""}
       <div class="reservoir-list">${rows.map((r) => card(r, open.has(r.id))).join("")}</div>
-      ${result && !busy && !pending ? `<details class="reservoir-add"><summary>新增滴定桶</summary>
+      ${result && !busy && !pending ? `<details class="reservoir-add" data-inventory-panel="new-reservoir"><summary>新增滴定桶</summary>
         <form data-inventory-type="create"><label>名稱<input name="name" maxlength="80" required></label>
           <label>連動滴定項目<select name="doseKey">${["kh", "ca", "mg", "aplus", "kplus", "custom"].map((key) => `<option value="${key}" ${rows.some((r) => r.doseKey === key) ? "disabled" : ""}>${({ kh: "KH", ca: "CA", mg: "MG", aplus: "A+", kplus: "K+", custom: "自訂添加劑" })[key]}</option>`).join("")}</select></label>
           <label>總容量 mL<input name="capacityMl" type="number" inputmode="decimal" min="0.000001" max="${MAX_RESERVOIR_CAPACITY_ML}" step="any" required></label>
           <button class="ghost-button" type="submit">新增</button></form></details>` : ""}
     `;
-    root.querySelectorAll("details[data-history-key]").forEach((el) => { el.open = expandedHistory.has(el.dataset.historyKey); });
-    onChange({ tankId, result, busy, error, pending: Boolean(pending), connected: Boolean(getClient()) });
+    restoreReservoirDrafts(root, draft);
+    renderedTankId = tankId;
+    publish();
   }
 
   function card(r, open) {
     const disabled = busy || Boolean(pending);
     const status = r.alertLabel || "無法估算／待設定";
     const source = r.quality === "actual" ? "裝置執行量計算" : r.quality === "manually_confirmed" ? "人工確認基準" : r.remainingIsUpperBound ? "資料不完整" : "估算剩餘量";
-    const days = r.estimatedDaysRemaining === null ? status : `推估 ${dayText(r.estimatedDaysRemaining)} 天`;
+    const days = r.estimatedDaysRemaining === null ? status : r.usableMl === 0 ? "預估耗盡" : `推估${formatReservoirDays(r.estimatedDaysRemaining)}`;
     const h = history.get(r.id);
     const numeric = (name, label, value = "", required = true, max = MAX_RESERVOIR_CAPACITY_ML, min = 0) => `<label>${label}<input name="${name}" type="number" inputmode="decimal" min="${min}" max="${max}" step="any" ${required ? "required" : ""} value="${value}" ${disabled ? "disabled" : ""}></label>`;
     return `<details class="reservoir-card is-${r.alertStatus}" data-reservoir="${r.id}" ${open ? "open" : ""}>
@@ -103,14 +126,14 @@ export function createReservoirController({ root, getTankId, getClient, ensureSy
         <form data-inventory-type="calibrate" data-id="${r.id}">${numeric("amountMl", r.remainingMl === null ? "實際剩餘量 mL" : "校正剩餘量 mL", "", true, r.capacityMl)}<label>校正原因<input name="reason" maxlength="1000" ${r.remainingMl !== null ? "required" : ""} ${disabled ? "disabled" : ""}></label><button class="primary-button" ${disabled ? "disabled" : ""}>${r.remainingMl === null ? "設定初始庫存" : "確認校正"}</button></form>
         <form data-inventory-type="refill" data-id="${r.id}">${numeric("amountMl", "本次添加量 mL", "", true, r.remainingMl === null ? r.capacityMl : Math.max(r.capacityMl - r.remainingMl, 0), 0.000001)}<label>備註（選填）<input name="notes" maxlength="1000" ${disabled ? "disabled" : ""}></label><button class="ghost-button" ${disabled || r.remainingMl === null || r.remainingIsUpperBound ? "disabled" : ""}>添加滴定液</button></form>
         ${renderReservoirManualHistory(r, disabled)}
-        <details class="reservoir-options"><summary>容量與庫存設定</summary>
+        <details class="reservoir-options" data-inventory-panel="${r.id}-options"><summary>容量與庫存設定</summary>
           <form data-inventory-type="capacity" data-id="${r.id}">${numeric("capacityMl", "總容量 mL", r.capacityMl)}${numeric("correctedRemainingMl", "若縮小容量，確認實際剩餘量 mL", "", false, r.capacityMl)}<button class="ghost-button" ${disabled ? "disabled" : ""}>儲存容量</button></form>
           <form data-inventory-type="reserve" data-id="${r.id}">${numeric("bottomReserveMl", "桶底保留量 mL", r.bottomReserveMl, true, r.capacityMl)}<button class="ghost-button" ${disabled ? "disabled" : ""}>儲存保留量</button></form>
           <form data-inventory-type="threshold" data-id="${r.id}">${numeric("reminderDays", "採購提醒天數", r.alertThresholds.reminderDays)}${numeric("warningDays", "警告天數", r.alertThresholds.warningDays)}${numeric("urgentDays", "緊急天數", r.alertThresholds.urgentDays)}<button class="ghost-button" ${disabled ? "disabled" : ""}>儲存天數門檻</button></form>
           <div class="reservoir-actions"><button class="ghost-button" type="button" data-inventory-action="tracking" data-id="${r.id}" ${disabled ? "disabled" : ""}>${r.trackingActive ? "停用" : "啟用"}庫存追蹤</button><button class="danger-button" type="button" data-inventory-action="delete" data-id="${r.id}" ${disabled ? "disabled" : ""}>移除滴定桶</button></div>
         </details>
         <dl class="reservoir-times"><div><dt>最後人工確認</dt><dd>${escapeHtml(date(r.lastManualConfirmedAt))}</dd></div><div><dt>最近補充</dt><dd>${escapeHtml(date(r.lastRefilledAt))}</dd></div><div><dt>最後計算</dt><dd>${escapeHtml(date(r.lastCalculatedAt))}</dd></div></dl>
-        <details class="reservoir-history"><summary>補充與每日消耗紀錄</summary><button type="button" class="ghost-button" data-inventory-action="history" data-id="${r.id}" ${busy ? "disabled" : ""}>${h ? "重新載入" : "查看紀錄"}</button>
+        <details class="reservoir-history" data-inventory-panel="${r.id}-ledger"><summary>補充與每日消耗紀錄</summary><button type="button" class="ghost-button" data-inventory-action="history" data-id="${r.id}" ${busy ? "disabled" : ""}>${h ? "重新載入" : "查看紀錄"}</button>
           ${h ? `<ol>${h.entries.map((e) => `<li><div><strong>${escapeHtml(labels[e.type] || e.type)}</strong><time>${escapeHtml(e.local_date?.slice?.(0, 10) || String(e.local_date).slice(0, 10))}</time></div><p>${["consumption", "consumption_correction", "execution_reconciliation"].includes(e.type) ? `消耗 ${n(Number(e.amount_ml))} mL${e.metadata?.dailyTotal?.estimatedMl ? "（估算）" : ""}` : `${e.before_ml === null ? "未設定" : n(Number(e.before_ml))} → ${e.after_ml === null ? "未設定" : n(Number(e.after_ml))} mL`}</p></li>`).join("")}</ol>${h.nextCursor ? `<button type="button" class="ghost-button" data-inventory-action="more-history" data-id="${r.id}" ${busy ? "disabled" : ""}>較早紀錄</button>` : ""}` : ""}
         </details>
       </div></details>`;
@@ -120,15 +143,17 @@ export function createReservoirController({ root, getTankId, getClient, ensureSy
     if (busy) return;
     const selected = getTankId();
     if (selected !== tankId) { tankId = selected; result = null; history.clear(); }
-    else if (!force && (root.contains(document.activeElement) || [...root.querySelectorAll("input")].some((input) => input.value !== input.defaultValue))) return;
     if (!selected || !getClient()) { render(); return; }
     const version = ++requestVersion;
-    busy = true; error = ""; render();
+    busy = true; error = ""; refreshError = "";
+    // Fetch while the form is being edited; do not disable its focused input or close the iOS keyboard.
+    if (!force && root.contains(root.ownerDocument?.activeElement)) publish();
+    else render({ discardDrafts: force });
     try {
       await ensureSynced();
       const next = await getClient().list(selected);
       if (version === requestVersion && selected === getTankId()) result = next;
-    } catch (e) { if (version === requestVersion) error = errorMessage(e); }
+    } catch (e) { if (version === requestVersion) { error = errorMessage(e); refreshError = error; } }
     finally {
       busy = false;
       if (invalidated) { invalidated = false; void refresh({ force: true }); }
@@ -139,6 +164,7 @@ export function createReservoirController({ root, getTankId, getClient, ensureSy
 
   async function submitOperation(operation, selected = getTankId()) {
     if (busy || !getClient()) return;
+    let succeeded = false;
     busy = true; error = "";
     storePending({ tankId: selected, operation });
     render();
@@ -147,13 +173,14 @@ export function createReservoirController({ root, getTankId, getClient, ensureSy
       const next = await getClient().operate(selected, operation);
       storePending(null);
       if (selected === getTankId()) { result = next; history.clear(); }
+      succeeded = true;
       onToast("庫存已更新，滴定設定未變更");
     } catch (e) {
       // Deterministic validation failures cannot have committed; network failures keep the exact retry request.
       if (["INVENTORY_HISTORY_NOT_FOUND", "INVENTORY_HISTORY_CONFLICT", "INVENTORY_CORRECTION_CONFLICT", "INVALID_INVENTORY_INPUT", "INVALID_INVENTORY_ALERT_DAYS", "INVENTORY_RESERVE_EXCEEDS_CAPACITY", "INVENTORY_CAPACITY_EXCEEDED", "INVENTORY_CONFIRMATION_REQUIRED", "DOSE_LINK_ALREADY_EXISTS", "RESERVOIR_NOT_FOUND", "TANK_NOT_FOUND", "INVENTORY_LIMIT_REACHED", "LOCAL_SYNC_REQUIRED"].includes(e.message)) storePending(null);
       error = errorMessage(e);
       onToast(error);
-    } finally { busy = false; render(); }
+    } finally { busy = false; render({ clearOperation: succeeded ? { ...operation, tankId: selected } : null }); }
   }
 
   root.addEventListener("submit", (event) => {
@@ -215,5 +242,5 @@ export function createReservoirController({ root, getTankId, getClient, ensureSy
     }
   });
   render();
-  return { refresh, invalidate() { ++requestVersion; tankId = null; result = null; error = ""; history.clear(); if (busy) invalidated = true; render(); } };
+  return { refresh, invalidate() { ++requestVersion; tankId = null; result = null; error = ""; refreshError = ""; history.clear(); if (busy) invalidated = true; render(); } };
 }

@@ -24,8 +24,8 @@ import { loadJson, saveJson } from "./services/storageService.js";
 const STORAGE_KEY = "seawaterTankMvp.v4";
 const APP_VERSION_STORAGE_KEY = "seawaterTankAppVersion.v1";
 const FALLBACK_VERSION = {
-  version: "1.5.1",
-  current_version: "1.5.1",
+  version: "1.5.2",
+  current_version: "1.5.2",
   build_time: "2026-10-20T00:00:00+08:00",
 };
 const DEBUG_MODE = false;
@@ -726,7 +726,8 @@ function metricCardClass(row, focus) {
 
 function renderDashboard() {
   const analysis = analyze();
-  const reminders = reservoirFocusMessages({ tankId: activeTank()?.id, dosing: activeTank()?.dosing, snapshot: reservoirFocusSnapshot });
+  const reminders = reservoirFocusMessages({ tankId: activeTank()?.id, dosing: activeTank()?.dosing,
+    snapshot: reservoirFocusSnapshot, online: navigator.onLine });
   const urgentInventory = renderReservoirFocus(reminders, true);
   const generalInventory = renderReservoirFocus(reminders, false);
   document.querySelector("#dashboardMeta").textContent = analysis
@@ -1625,6 +1626,12 @@ function setupEvents() {
   document.addEventListener("visibilitychange", refreshVisibleInventory);
   window.addEventListener("pageshow", refreshVisibleInventory);
   window.addEventListener("focus", refreshVisibleInventory);
+  const refreshInventoryAge = () => {
+    if (!document.hidden && document.getElementById("dashboard").classList.contains("active")) renderDashboard();
+  };
+  window.addEventListener("offline", refreshInventoryAge);
+  window.addEventListener("online", () => { refreshInventoryAge(); refreshVisibleInventory(); });
+  window.setInterval(refreshInventoryAge, 60000);
   document.querySelectorAll(".nav-link").forEach((button) => {
     button.addEventListener("click", () => switchPage(button.dataset.section));
   });

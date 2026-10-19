@@ -1,4 +1,4 @@
-const CACHE_NAME = "seawater-tank-mvp-v51";
+const CACHE_NAME = "seawater-tank-mvp-v52";
 const APP_SHELL = [
   "./",
   "index.html",
@@ -25,6 +25,7 @@ const APP_SHELL = [
   "services/cloudConfigService.js",
   "services/cloudSyncService.js",
   "services/adminCloudService.js",
+  "services/reservoirDisplayService.js",
   "engines/safetyEngine.js",
   "engines/analysisEngine.js",
   "engines/eventRecoveryEngine.js",
@@ -36,6 +37,7 @@ const APP_SHELL = [
   "components/measurementSopComponent.js",
   "components/reservoirComponent.js",
   "components/reservoirFocusModule.js",
+  "components/reservoirDraftModule.js",
   "engines/reservoirAlertEngine.js",
   "types/domainTypes.js",
   "icons/clownfish-32.png",

@@ -1,21 +1,25 @@
 import { reservoirDose, sameReservoirDose } from "../modules/reservoirModule.js";
 import { escapeHtml } from "../services/formatService.js";
-
-const dayText = (days) => days.toLocaleString("zh-TW", { maximumFractionDigits: 1 });
+import { formatReservoirDays, inventoryFreshness } from "../services/reservoirDisplayService.js";
 
 // Present the inventory API's classification; never calculate stock or classify rounded days here.
-export function reservoirFocusMessages({ tankId, dosing, snapshot = {} }) {
+export function reservoirFocusMessages({ tankId, dosing, snapshot = {}, online = true, now = Date.now() }) {
   if (!tankId) return [];
   const message = (text) => [{ level: "needs_confirmation", text }];
   if (!snapshot.connected) return message("滴定桶庫存尚未連線，請至滴定頁確認資料。");
-  if (snapshot.error || snapshot.pending) return message("滴定桶資料尚未確認，請至滴定頁完成更新；暫不顯示可用天數。");
   if (snapshot.tankId !== tankId || !snapshot.result) return message("滴定桶資料待更新，請至滴定頁確認。");
   if (!Array.isArray(snapshot.result.reservoirs)) return message("滴定桶資料不完整，請至滴定頁確認。");
   const rows = snapshot.result.reservoirs.filter((r) => r.tankId === tankId && !r.deletedAt);
   if (!rows.length) return message("尚未設定滴定桶庫存，請至滴定頁補齊資料。");
+  const freshness = inventoryFreshness({ calculatedAt: snapshot.result.calculatedAt, now, online,
+    refreshError: snapshot.refreshError ?? snapshot.error });
+  const pending = snapshot.pendingOperation?.tankId === tankId ? snapshot.pendingOperation : null;
+  const unknownPending = snapshot.pending && !snapshot.pendingOperation;
+  const pendingNames = [];
   const groups = { urgent: [], warning: [], reminder: [], needs_confirmation: [] };
   for (const row of rows) {
     const current = reservoirDose(dosing, row.doseKey);
+    if (pending?.reservoirId === row.id) { pendingNames.push(row.name); continue; }
     if (current.enabled === false || current.pausedDays > 0 || current.effectiveMlPerDay === 0) continue;
     const incomplete = () => groups.needs_confirmation.push(row.name);
     if (!sameReservoirDose(current, row)) { incomplete(); continue; }
@@ -33,11 +37,15 @@ export function reservoirFocusMessages({ tankId, dosing, snapshot = {} }) {
     if (!entries.length) continue;
     const text = entries.map((r) => r.remainingMl === 0 ? `${r.name} 滴定液預估耗盡`
       : r.usableMl === 0 ? `${r.name} 滴定液可用量預估耗盡`
-      : `${r.name} 滴定液預估剩 ${dayText(r.estimatedDaysRemaining)} 天`).join("；");
-    messages.push({ level, text: `${text}，${actions[level]}。` });
+      : r.estimatedDaysRemaining < 1 ? `${r.name} 滴定液預估不足 1 天`
+      : `${r.name} 滴定液預估剩 ${formatReservoirDays(r.estimatedDaysRemaining)}`).join("；");
+    messages.push({ level, text: `${freshness.stale || unknownPending ? "上次估算：" : ""}${text}，${actions[level]}。` });
   }
+  if (pendingNames.length) messages.push({ level: "needs_confirmation", text: `${pendingNames.join("、")} 操作待確認，請至滴定頁確認結果；該桶暫不顯示可用天數。` });
+  else if (pending || unknownPending) messages.push({ level: "needs_confirmation", text: "有滴定桶操作待確認，請至滴定頁確認結果。" });
   if (groups.needs_confirmation.length) messages.push({ level: "needs_confirmation",
     text: `${groups.needs_confirmation.join("、")} 庫存或滴定資料需補齊／更新，暫無可靠可用天數。` });
+  if (freshness.stale) messages.push({ level: "needs_confirmation", text: freshness.message });
   return messages;
 }
 
