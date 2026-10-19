@@ -2827,10 +2827,15 @@ th {
 .reservoir-card progress::-webkit-progress-bar { background: #e9f2f3; }
 .reservoir-card progress::-webkit-progress-value { background: #278a83; }
 .reservoir-card progress::-moz-progress-bar { background: #278a83; }
-.reservoir-card.is-low { border-color: #edc49c; }
-.reservoir-card.is-low progress::-webkit-progress-value { background: #c67b25; }
-.reservoir-card.is-low progress::-moz-progress-bar { background: #c67b25; }
-.reservoir-card.is-low .reservoir-status { color: var(--reservoir-warning); }
+.reservoir-card.is-reminder { border-color: #d5cb8b; }
+.reservoir-card.is-reminder .reservoir-status { color: #79620b; }
+.reservoir-card.is-warning { border-color: #edc49c; }
+.reservoir-card.is-warning .reservoir-status { color: var(--reservoir-warning); }
+.reservoir-card.is-urgent { border-color: #e3a6ac; }
+.reservoir-card.is-urgent .reservoir-status { color: #ab2637; }
+.reservoir-card.is-urgent .reservoir-warning { color: #922439; background: #fff0f2; border-color: #e9bcc3; }
+.reservoir-card.is-unavailable .reservoir-status, .reservoir-card.is-needs_confirmation .reservoir-status { color: #8c4b15; }
+.reservoir-estimate-note { color: #526c76; font-size: 13px; line-height: 1.6; margin: 0 0 16px; }
 .reservoir-caption { flex-wrap: wrap; color: #526c76; font-size: 13px; }
 .reservoir-card-body { border-top: 1px solid #e5edef; padding: 16px; }
 .reservoir-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 10px; margin: 0 0 18px; }

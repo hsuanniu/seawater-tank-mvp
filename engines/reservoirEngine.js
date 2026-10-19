@@ -1,4 +1,5 @@
-import { DOSE_KEYS, reservoirDose, sameReservoirDose } from "../modules/reservoirModule.js";
+import { DEFAULT_RESERVOIR_ALERT_DAYS, MAX_RESERVOIR_CAPACITY_ML, DOSE_KEYS, reservoirDose, sameReservoirDose } from "../modules/reservoirModule.js";
+import { evaluateReservoirAvailability, validReservoirAlertDays } from "./reservoirAlertEngine.js";
 
 const DAY = 86400000;
 const OFFSET = 8 * 3600000;
@@ -7,12 +8,13 @@ export const inventoryRound = (value) => Math.round(value * 1e6) / 1e6;
 export const taipeiInventoryDate = (ms) => new Date(ms + OFFSET).toISOString().slice(0, 10);
 const iso = (ms) => new Date(ms).toISOString();
 
-export function createReservoir({ id, tankId, name, doseKey, capacityMl, warningThreshold = 80 }, dosing, at) {
+export function createReservoir({ id, tankId, name, doseKey, capacityMl, bottomReserveMl = 0, alertThresholds = DEFAULT_RESERVOIR_ALERT_DAYS }, dosing, at) {
   if (!id || !tankId || !String(name || "").trim() || String(name).length > 80 || !DOSE_KEYS.includes(doseKey)
-    || !Number.isFinite(capacityMl) || capacityMl <= 0 || capacityMl > 1000000
-    || !Number.isFinite(warningThreshold) || warningThreshold <= 0 || warningThreshold > 100) throw new Error("INVALID_INVENTORY_INPUT");
+    || !Number.isFinite(capacityMl) || capacityMl <= 0 || capacityMl > MAX_RESERVOIR_CAPACITY_ML
+    || !Number.isFinite(bottomReserveMl) || bottomReserveMl < 0 || bottomReserveMl > capacityMl
+    || !validReservoirAlertDays(alertThresholds)) throw new Error("INVALID_INVENTORY_INPUT");
   const setting = reservoirDose(dosing, doseKey);
-  return { id, tankId, name: name.trim(), doseKey, capacityMl, initialCapacityMl: capacityMl, warningThreshold,
+  return { id, tankId, name: name.trim(), doseKey, capacityMl, initialCapacityMl: capacityMl, bottomReserveMl, alertThresholds: { ...alertThresholds },
     active: true, deletedAt: null, createdAt: at, remainingMl: null, lastCalculatedAt: null,
     lastManualConfirmedAt: null, lastRefilledAt: null, manualEvents: [], executions: [],
     schedule: [{ id: "origin", at, setting }], seenDosingEventIds: [], dataGaps: [],
@@ -52,8 +54,9 @@ export function ingestDosingHistory(reservoir, tank, cloudUpdatedAt, at) {
 }
 
 function validSetting(s) {
-  return s && Number.isFinite(s.configuredMlPerDay) && s.configuredMlPerDay >= 0 && typeof s.enabled === "boolean"
-    && Number.isFinite(s.pausedDays) && s.pausedDays >= 0 && s.effectiveMlPerDay === (s.enabled && !s.pausedDays ? s.configuredMlPerDay : 0);
+  const validOrUnknown = (n) => n === null || Number.isFinite(n) && n >= 0;
+  return s && validOrUnknown(s.configuredMlPerDay) && typeof s.enabled === "boolean" && validOrUnknown(s.pausedDays)
+    && s.effectiveMlPerDay === (!s.enabled || s.pausedDays > 0 ? 0 : s.pausedDays === null ? null : s.configuredMlPerDay);
 }
 
 function addGap(r, start, end, reason) {
@@ -107,7 +110,12 @@ export function calculateReservoir(reservoir, at) {
         bucket.gapSeconds += (a - from) / 1000;
         if (!relevantGaps.some((g) => g.start === gap.start && g.end === gap.end && g.reason === gap.reason)) relevantGaps.push(gap);
       }
-      if (!coverage && !gap && tracking && setting) {
+      const validDose = Number.isFinite(setting?.effectiveMlPerDay) && setting.effectiveMlPerDay >= 0;
+      if (!coverage && tracking && !validDose) {
+        bucket.gapSeconds += (a - from) / 1000;
+        relevantGaps.push({ start: iso(from), end: iso(a), reason: "有效每日滴定量缺失或無效，未扣除未知消耗" });
+      }
+      if (!coverage && !gap && tracking && validDose) {
         bucket.estimatedSeconds += (a - from) / 1000;
         const demand = setting.effectiveMlPerDay * (a - from) / DAY;
         const deducted = Math.min(remaining, demand);
@@ -144,26 +152,27 @@ export function calculateReservoir(reservoir, at) {
 }
 
 export function reservoirView(r) {
-  const dose = r.observedDosing;
+  const dose = r.observedDosing || {};
+  const bottomReserveMl = r.bottomReserveMl ?? 0;
+  const alertThresholds = r.alertThresholds ?? DEFAULT_RESERVOIR_ALERT_DAYS;
   const percentage = r.remainingMl === null ? null : inventoryRound(r.remainingMl / r.capacityMl * 100);
-  const low = r.remainingMl !== null && r.remainingMl < r.capacityMl * r.warningThreshold / 100;
+  const availability = evaluateReservoirAvailability({ remainingMl: r.remainingMl, bottomReserveMl, alertThresholds,
+    effectiveMlPerDay: dose.effectiveMlPerDay, trackingActive: r.active, remainingIsUpperBound: r.quality === "data_gap" });
   return { id: r.id, tankId: r.tankId, name: r.name, doseKey: r.doseKey, capacityMl: r.capacityMl,
-    remainingMl: r.remainingMl, percentage, warningThreshold: r.warningThreshold,
+    remainingMl: r.remainingMl, percentage, bottomReserveMl, alertThresholds: { ...alertThresholds },
     ...dose, trackingActive: r.active, deletedAt: r.deletedAt,
-    estimatedDaysRemaining: r.remainingMl === null || r.quality === "data_gap" || !r.active || !dose.effectiveMlPerDay
-      ? null : inventoryRound(r.remainingMl / dose.effectiveMlPerDay),
+    ...availability,
     lastManualConfirmedAt: r.lastManualConfirmedAt, lastCalculatedAt: r.lastCalculatedAt, lastRefilledAt: r.lastRefilledAt,
     quality: r.quality, isEstimate: r.quality === "estimated", remainingIsUpperBound: r.quality === "data_gap",
-    dataGaps: r.relevantGaps || [], alertStatus: r.remainingMl === null ? "pending_initialization" : low ? "low" : r.quality === "data_gap" ? "needs_confirmation" : "normal",
-    warning: r.remainingMl === null ? "待初始化：請手動輸入實際剩餘量" : r.quality === "data_gap" ? `${r.name}${low ? ` 庫存上限已低於 ${r.warningThreshold}%；` : "："}有滴定時間資料缺口，剩餘量僅為上限，請人工確認庫存`
-      : low ? `${r.name} ${r.quality === "estimated" ? "估算" : "紀錄計算"}庫存低於 ${r.warningThreshold}%，建議補充或確認庫存` : null };
+    dataGaps: r.relevantGaps || [], inventoryMeasurementType: "calculated_not_level_sensor",
+    warning: ["normal", "not_dosing", "tracking_disabled"].includes(availability.alertStatus) ? null : `${r.name}：${availability.alertReason}` };
 }
 
 export function applyReservoirOperation(reservoir, operation, at) {
   let r = calculateReservoir(reservoir, at);
   const before = reservoirView(r);
   const e = { id: operation.idempotencyKey, type: operation.type, at, source: operation.source || "manual_app" };
-  const validMl = (v, allowZero = true) => typeof v === "number" && Number.isFinite(v) && v >= (allowZero ? 0 : 0.000001) && v <= 1000000;
+  const validMl = (v, allowZero = true) => typeof v === "number" && Number.isFinite(v) && v >= (allowZero ? 0 : 0.000001) && v <= MAX_RESERVOIR_CAPACITY_ML;
   if (r.deletedAt) throw new Error("RESERVOIR_NOT_FOUND");
   switch (operation.type) {
     case "calibrate":
@@ -173,20 +182,26 @@ export function applyReservoirOperation(reservoir, operation, at) {
       break;
     case "refill":
       if (r.remainingMl === null || r.quality === "data_gap") throw new Error("INVENTORY_CONFIRMATION_REQUIRED");
-      if (!validMl(operation.amountMl, false) || r.remainingMl + operation.amountMl > r.capacityMl + 0.000001) throw new Error("INVENTORY_CAPACITY_EXCEEDED");
+      if (!validMl(operation.amountMl, false) || operation.amountMl > r.capacityMl - r.remainingMl) throw new Error("INVENTORY_CAPACITY_EXCEEDED");
       e.amountMl = operation.amountMl;
       r.lastRefilledAt = at;
       break;
     case "capacity":
       if (!validMl(operation.capacityMl, false)) throw new Error("INVALID_INVENTORY_INPUT");
+      if ((r.bottomReserveMl ?? 0) > operation.capacityMl) throw new Error("INVENTORY_RESERVE_EXCEEDS_CAPACITY");
       if (r.remainingMl !== null && operation.capacityMl < r.remainingMl && operation.correctedRemainingMl === undefined) throw new Error("INVENTORY_CONFIRMATION_REQUIRED");
       e.capacityMl = operation.capacityMl;
       r.capacityMl = operation.capacityMl;
       break;
     case "threshold":
-      if (!Number.isFinite(operation.warningThreshold) || operation.warningThreshold <= 0 || operation.warningThreshold > 100) throw new Error("INVALID_INVENTORY_INPUT");
-      e.warningThreshold = operation.warningThreshold;
-      r.warningThreshold = operation.warningThreshold;
+      if (!validReservoirAlertDays(operation.alertThresholds)) throw new Error("INVALID_INVENTORY_ALERT_DAYS");
+      e.alertThresholds = { ...operation.alertThresholds };
+      r.alertThresholds = e.alertThresholds;
+      break;
+    case "reserve":
+      if (!validMl(operation.bottomReserveMl) || operation.bottomReserveMl > r.capacityMl) throw new Error("INVALID_INVENTORY_INPUT");
+      e.bottomReserveMl = operation.bottomReserveMl;
+      r.bottomReserveMl = operation.bottomReserveMl;
       break;
     case "tracking":
       if (typeof operation.active !== "boolean") throw new Error("INVALID_INVENTORY_INPUT");

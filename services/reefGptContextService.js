@@ -1,5 +1,7 @@
 import { analyzeTank } from "../engines/analysisEngine.js";
-import { DEFAULT_DOSING, getDoseStatus } from "../modules/dosingModule.js";
+import { DEFAULT_DOSING } from "../modules/dosingModule.js";
+import { DEFAULT_RESERVOIR_ALERT_DAYS, reservoirDose } from "../modules/reservoirModule.js";
+import { evaluateReservoirAvailability } from "../engines/reservoirAlertEngine.js";
 import { getSortedRecords } from "../modules/measurementModule.js";
 import { DEFAULT_TANK, PARAMETERS } from "../modules/tankModule.js";
 import { splitActiveAndArchivedRecords } from "./retentionService.js";
@@ -153,10 +155,11 @@ export function buildReefGptContext({ state, tankId, cloudUpdatedAt = null, rese
     const recommendation = recommendations.find((entry) => entry.parameter === r.doseKey);
     const validDose = recommendation?.canAdjust === true && Number.isFinite(recommendation.suggestedDoseMlPerDay)
       ? recommendation.suggestedDoseMlPerDay : null;
-    const suggestedDays = validDose > 0 && r.remainingMl !== null && !r.remainingIsUpperBound ? r.remainingMl / validDose : null;
-    return { ...r, daysAtApprovedSuggestedDose: suggestedDays,
-      approvedSuggestionInventoryWarning: suggestedDays !== null && suggestedDays < 7
-        ? `${r.name} 庫存不足以支持安全引擎建議量使用 7 天，請先補充或確認庫存；不可因此自行改變滴定量。` : null };
+    const suggestedAvailability = validDose === null ? null : evaluateReservoirAvailability({ ...r, effectiveMlPerDay: validDose });
+    return { ...r, daysAtApprovedSuggestedDose: suggestedAvailability?.estimatedDaysRemaining ?? null,
+      availabilityAtApprovedSuggestedDose: suggestedAvailability,
+      approvedSuggestionInventoryWarning: suggestedAvailability?.requiresAlert
+        ? `${r.name} 若套用安全引擎核准的建議量：${suggestedAvailability.alertReason} 庫存不足不可作為自行改變滴定量的依據。` : null };
   });
   return {
     schemaVersion: "1.0",
@@ -170,24 +173,16 @@ export function buildReefGptContext({ state, tankId, cloudUpdatedAt = null, rese
       requiresNewMeasurement: stale,
       warning: "GPT 只能讀到最後成功同步的資料；請先核對測量日期與雲端更新時間。",
     },
-    dosing: Object.fromEntries(["kh", "ca", "mg", "aplus", "kplus"].map((key) => {
-      const status = getDoseStatus(dosing, key);
-      const configuredDose = numberOrNull(dosing[key]);
-      return [key, {
-        configuredMlPerDay: configuredDose,
-        effectiveMlPerDay: status.enabled && status.pausedDays === 0 ? configuredDose : 0,
-        ...status,
-      }];
-    })),
+    dosing: Object.fromEntries(["kh", "ca", "mg", "aplus", "kplus"].map((key) => [key, reservoirDose(data.dosing, key)])),
     latestMeasurement: measurementData(latest),
     previousMeasurement: measurementData(previous),
     recentMeasurements: records.slice(-8).reverse().map(measurementData),
     recommendations,
     reservoirInventory: {
       timeZone: "Asia/Taipei", calculatedAt: inventoryCalculatedAt,
-      defaultWarningThreshold: 80, reservoirs: inventory,
+      alertPolicy: "estimated_usable_days", defaultAlertThresholds: { ...DEFAULT_RESERVOIR_ALERT_DAYS }, reservoirs: inventory,
       warnings: inventory.flatMap((r) => [r.warning, r.approvedSuggestionInventoryWarning].filter(Boolean)),
-      interpretation: "每次水質分析都須列出全部滴定桶庫存與警告。庫存是按已同步設定估算，除非 quality=actual；手動確認時間不是計算時間，也不是水質測量日期或同步時間。canAdjust=false 或 suggestedDoseMlPerDay=null 時不可產生新劑量，暫不計算不等於維持。庫存不足只提醒補充，不可自動改滴定。",
+      interpretation: "每次水質分析須列出全部滴定桶與可用天數告警，百分比僅顯示液位，不是告警依據。可用量=max(剩餘量-桶底保留量,0)，除以有效每日總量；依原始天數及各桶門檻分類，不得自行按四捨五入後的天數重判。0 用量為未滴定，缺失或無效為無法估算，未填存量為待設定。庫存及天數為系統推估，非液位感測器實測。人工確認、庫存計算、水質測量及同步時間必須分開。canAdjust=false 或建議=null 時不可產生新劑量，暫不計算不等於維持；庫存不得改變滴定量。",
     },
     referenceFactors: {
       events: recentEntries(data.events, ["event_start_date", "start_date", "date", "createdAt"], now, ["id", "type", "event_type", "date", "event_start_date", "start_date", "affected_element", "title", "note", "notes", "expected_recovery_days", "recovery_days"]),

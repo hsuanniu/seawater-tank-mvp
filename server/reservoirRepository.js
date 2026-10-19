@@ -1,5 +1,6 @@
 import { randomUUID, createHash } from "node:crypto";
 import { migrateReservoirInventory } from "../migrations/001_reservoir_inventory.js";
+import { migrateReservoirDayAlerts } from "../migrations/002_reservoir_day_alerts.js";
 import { DEFAULT_RESERVOIRS } from "../modules/reservoirModule.js";
 import { applyReservoirOperation, calculateReservoir, createReservoir, ingestDosingHistory, inventoryRound, reservoirView, taipeiInventoryDate } from "../engines/reservoirEngine.js";
 
@@ -9,7 +10,10 @@ const safeId = (value) => typeof value === "string" && /^[a-zA-Z0-9_-]{1,100}$/.
 
 export function createReservoirRepository(sql, cloudRepository, { now = () => Date.now() } = {}) {
   let ready;
-  const ensureSchema = () => ready ||= migrateReservoirInventory(sql).catch((error) => { ready = null; throw error; });
+  const ensureSchema = () => ready ||= (async () => {
+    await migrateReservoirInventory(sql);
+    await migrateReservoirDayAlerts(sql);
+  })().catch((error) => { ready = null; throw error; });
 
   async function load() {
     await cloudRepository.libraryId();
@@ -101,12 +105,17 @@ export function createReservoirRepository(sql, cloudRepository, { now = () => Da
         }
         const view = reservoirView(r);
         const open = alerts.find((a) => a.reservoirId === r.id);
-        const shouldAlert = r.active && !r.deletedAt && view.alertStatus === "low";
+        const shouldAlert = r.active && !r.deletedAt && view.requiresAlert;
         if (shouldAlert && !open) {
           const alert = { id: randomUUID(), tankId: r.tankId, reservoirId: r.id, openedAt: at, resolvedAt: null,
-            threshold: r.warningThreshold, triggeringInventory: view, source: view.isEstimate ? "estimated_inventory" : "recorded_inventory" };
+            policyVersion: 2, level: view.alertStatus, alertThresholds: view.alertThresholds,
+            triggeringInventory: view, source: "estimated_days_remaining", severityChanges: [] };
           changedAlerts.push(alert);
           r.activeAlertId = alert.id;
+        } else if (shouldAlert && open && open.level !== view.alertStatus) {
+          changedAlerts.push({ ...open, level: view.alertStatus, updatedAt: at, triggeringInventory: view,
+            severityChanges: [...(open.severityChanges || []), { at, from: open.level, to: view.alertStatus }] });
+          r.activeAlertId = open.id;
         } else if (!shouldAlert && open) {
           changedAlerts.push({ ...open, resolvedAt: at });
           r.activeAlertId = null;
@@ -120,7 +129,8 @@ export function createReservoirRepository(sql, cloudRepository, { now = () => Da
       const response = { inventoryRevision: Number(current.revision) + 1, calculatedAt: at,
         cloudUpdatedAt: iso(current.updated_at), reservoirs: tankId ? views.filter((r) => r.tankId === tankId) : views };
       const payload = all.map((r) => ({ id: r.id, tank_id: r.tankId, name: r.name, dose_key: r.doseKey,
-        capacity_ml: r.capacityMl, remaining_ml: r.remainingMl, warning_threshold: r.warningThreshold,
+        capacity_ml: r.capacityMl, remaining_ml: r.remainingMl, bottom_reserve_ml: r.bottomReserveMl ?? 0,
+        reminder_days: r.alertThresholds?.reminderDays ?? 30, warning_days: r.alertThresholds?.warningDays ?? 14, urgent_days: r.alertThresholds?.urgentDays ?? 7,
         active: r.active, deleted_at: r.deletedAt, data: r }));
       // Lock order: water-state row, then inventory revision. The guard, ledger, alerts and replay response commit atomically.
       const result = await sql`WITH cloud_lock AS MATERIALIZED (
@@ -129,11 +139,13 @@ export function createReservoirRepository(sql, cloudRepository, { now = () => Da
         UPDATE reef_inventory_revision SET revision = reef_inventory_revision.revision + 1 FROM cloud_lock
         WHERE id = 'personal' AND reef_inventory_revision.revision = ${current.revision} RETURNING reef_inventory_revision.revision
       ), reservoirs AS (
-        INSERT INTO dosing_reservoirs (id, tank_id, name, dose_key, capacity_ml, remaining_ml, warning_threshold, active, deleted_at, data)
+        INSERT INTO dosing_reservoirs (id, tank_id, name, dose_key, capacity_ml, remaining_ml, bottom_reserve_ml, reminder_days, warning_days, urgent_days, active, deleted_at, data)
         SELECT r.* FROM jsonb_to_recordset(${JSON.stringify(payload)}::jsonb) AS r(id text, tank_id text, name text, dose_key text,
-          capacity_ml numeric, remaining_ml numeric, warning_threshold numeric, active boolean, deleted_at timestamptz, data jsonb), guard
+          capacity_ml numeric, remaining_ml numeric, bottom_reserve_ml numeric, reminder_days numeric, warning_days numeric, urgent_days numeric,
+          active boolean, deleted_at timestamptz, data jsonb), guard
         ON CONFLICT (id) DO UPDATE SET capacity_ml = EXCLUDED.capacity_ml, remaining_ml = EXCLUDED.remaining_ml,
-          warning_threshold = EXCLUDED.warning_threshold, active = EXCLUDED.active, deleted_at = EXCLUDED.deleted_at, data = EXCLUDED.data
+          bottom_reserve_ml = EXCLUDED.bottom_reserve_ml, reminder_days = EXCLUDED.reminder_days, warning_days = EXCLUDED.warning_days, urgent_days = EXCLUDED.urgent_days,
+          active = EXCLUDED.active, deleted_at = EXCLUDED.deleted_at, data = EXCLUDED.data
         RETURNING id
       ), entries AS (
         INSERT INTO reservoir_transactions (id, tank_id, reservoir_id, type, occurred_at, local_date, source, amount_ml, before_ml, after_ml, metadata)

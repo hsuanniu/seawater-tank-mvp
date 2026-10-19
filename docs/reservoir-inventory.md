@@ -2,15 +2,15 @@
 
 ## First Use
 
-Open the existing dosing page and expand the five inventory cards below the daily settings. Enter the actual remaining mL and confirm each baseline. The defaults are KH/CA/MG 1000mL and A+/K+ 500mL, all with **null stock** until confirmed. Cloud management login and a completed initial import are required. No existing dosing value is changed.
+Open the existing dosing page and expand the five inventory cards below the daily settings. Enter the actual remaining mL and confirm each baseline. The defaults are KH/CA/MG 1500mL and A+/K+ 800mL, all with **null stock** until confirmed. Cloud management login and a completed initial import are required. No existing dosing value is changed.
 
 ## Persistence and Migration
 
-`migrations/001_reservoir_inventory.js` is an additive, repeatable migration. Run `npm run db:migrate:inventory` with server-only `DATABASE_URL`, or let the inventory repository apply it on first authenticated use.
+Run `npm run db:migrate:inventory` with server-only `DATABASE_URL`, or let the repository apply the repeatable migrations on first authenticated use. Migration 001 adds inventory tables. Migration 002 runs a one-time transactional correction of the old default capacities (1000 -> 1500; 500 -> 800) without changing stock, calibration dates, refill/consumption history or dosing. Explicit custom capacities such as 2000mL are retained. A dated capacity event and migration audit preserve the old capacity for historical replay. Old percentage alert episodes are resolved, not deleted. The legacy `warning_threshold` database column and historical percentage-setting events remain for history/rolling-deployment compatibility, but are never used for current alerts.
 
 - `dosing_reservoirs`: current per-tank inventory aggregate, replayable manual events, effective schedule and device coverage. Null stock is not an empty/full bucket.
 - `reservoir_transactions`: immutable calibration/refill/capacity/tracking/consumption/correction audit, Taipei local day, source and before/after values.
-- `reservoir_alerts`: one open low-stock episode per reservoir, resolved on recovery; no new daily notification while the episode stays open.
+- `reservoir_alerts`: one open days-based episode per reservoir, updated on severity changes and resolved on recovery; no repeated daily notification while the episode stays open.
 - `reef_inventory_revision`: optimistic concurrency guard.
 - `reservoir_operations`: idempotency key, request hash and committed response; retries return that response without applying a second operation.
 
@@ -18,9 +18,13 @@ Daily dosing stays in the existing TankStore/cloud snapshot. A backward-compatib
 
 Inventory updates lock the cloud-state row and compare both revisions in one PostgreSQL statement. Reservoirs, audit entries, alerts and the idempotency response commit together or not at all. Failed CAS retries reload and recalculate; no client-side decrement is authoritative. Removed buckets are tombstoned; audits remain accessible through the authenticated history API.
 
+Capacity is editable. Remaining stock and bottom reserve are independently validated against the bucket's current capacity in the form, backend and database. Lowering capacity below stock requires an explicit corrected stock value, never silent truncation. Raising capacity never fills or scales stock. The global 1,000,000mL technical bound is shared; there is no 1000/500mL input cap.
+
 ## Consumption
 
 Consumption is replayed from the latest manual confirmation using exact timestamps, with day boundaries at Asia/Taipei midnight. Estimated usage is uniform over elapsed time at the **effective** daily rate; an enabled flag plus `pausedDays > 0` means zero effective dose until explicitly resumed. This does not infer a pause end date.
+
+The existing ml/day setting is a complete daily total: if a pump runs several times, enter their sum, not one execution's amount. There is no separate intraday pump scheduling model in this app; weekly additive reference schedules must not be added to this total again. Missing, blank, negative or invalid daily settings are unknown, not zero, and unknown periods are not deducted.
 
 Rate/enable changes are timestamped, so late offline events recalculate the affected estimates using the correct historical rate. Differences are appended as corrections, not duplicate debits. Calibration resets the baseline; refill and capacity changes are replayed in order, including events on the same day. Remaining stock is clamped to [0, capacity]. If a historical correction makes an earlier refill exceed capacity, the result is flagged for manual confirmation.
 
@@ -37,13 +41,17 @@ Existing management session and CORS rules apply. These endpoints are never expo
 - `GET /api/internal/reservoirs/{tankId}/{reservoirId}/history[/{beforeSequence}]`: immutable audit, 100 entries plus `nextCursor`.
 - `GET /api/internal/reservoirs/reconcile`: separate cron Bearer secret.
 
-Operation types: `calibrate {amountMl}`, `refill {amountMl}`, `capacity {capacityMl, correctedRemainingMl?}`, `threshold {warningThreshold}`, `tracking {active}`, `delete`, `create {name, doseKey, capacityMl, warningThreshold?}`. Reducing capacity below stock requires an explicit corrected amount. A live daily-dose key can only link one bucket, including the existing `custom` key; deleted links may be replaced. Maximum 30 live buckets per tank.
+Operation types: `calibrate {amountMl}`, `refill {amountMl}`, `capacity {capacityMl, correctedRemainingMl?}`, `reserve {bottomReserveMl}`, `threshold {alertThresholds:{reminderDays,warningDays,urgentDays}}`, `tracking {active}`, `delete`, `create {name,doseKey,capacityMl,bottomReserveMl?,alertThresholds?}`. The old percentage-only threshold request is rejected. Reducing capacity below stock requires an explicit corrected amount; reduce reserve first if it would exceed the new capacity. A live daily-dose key can only link one bucket, including the existing `custom` key; deleted links may be replaced. Maximum 30 live buckets per tank.
 
 For future device integration, `execution {start, end, records:[{id, executedAt, amountMl}]}` asserts **complete** device coverage of [start,end), including zero-execution periods. Each pulse is timestamped; duplicate IDs and overlapping coverage are rejected. Partial logs must not be submitted as complete coverage. Actual coverage replaces estimates, never adds to them. No hardware connector is installed by this change.
 
 ## GPT
 
-Existing operation IDs and routes stay unchanged. Context adds `reservoirInventory`: all default buckets (or the user's active inventory list), provenance, confirmation/calculation times, percent, effective/configured rates, days and warnings. Stock below the configurable threshold (strictly <80% by default) warns. A valid engine-approved dose with fewer than seven days of inventory adds a supply warning. Inventory never changes engine output or daily settings.
+Existing operation IDs and routes stay unchanged. `reservoirInventory` contains provenance, calculation/confirmation times, display-only percent, configured/effective daily totals, bottom reserve, usable mL, raw days, thresholds, alert level/label/reason. No percentage-based alarm is produced. Inventory never changes engine output or daily settings.
+
+`engines/reservoirAlertEngine.js` is the common inventory safety classifier used by the inventory engine and the approved-dose forecast in GPT context. The UI renders its API-provided result, rather than reclassifying rounded numbers. Usable mL = max(remaining - reserve, 0), with reserve default 0. Divide by the effective daily total without rounding. Defaults: >30 normal; (14,30] reminder; (7,14] warning; <=7 urgent. Validate reminder > warning > urgent > 0. Display days with one decimal only. Zero effective dose is not_dosing, null stock is pending_initialization, invalid/missing dose is unavailable. Unknown inventory intervals require confirmation. Stock and days are calculations, never liquid-level sensor measurements.
+
+A valid engine-approved new dose is evaluated with the same reserve and custom day thresholds. Its supply risk is explicitly conditional on applying that dose; neither its forecast nor inventory alerts can alter the approved dose or bypass canAdjust=false/null guards.
 
 Re-import the existing `/api/openapi` URL in GPT Actions to update the response schema and instructions. The token and authentication stay the same. Policy instructs GPT to include inventory warnings in every water analysis, distinguish measurement/sync/inventory confirmation times, and never invent a dose when `canAdjust=false` or the suggestion is null. LLM compliance is not an enforced controller; GPT remains read-only.
 
@@ -57,4 +65,4 @@ New: `modules/reservoirModule.js`, `engines/reservoirEngine.js`, `migrations/001
 
 Integration: `services/tankStore.js`, `services/adminCloudService.js`, `services/reefGptContextService.js`, `services/reefGptApiService.js`, `server/cloudRepository.js`, `server/cloudHandler.js`, `server/index.js`, `api/index.js`, `app.module.js`, `app.js`, `index.html`, `styles.css`, `sw.js`, `vercel.json`, `scripts/checkCloudBundle.mjs`, `package.json`, `package-lock.json`, `version.json`.
 
-Release checks: 117 tests passed (20 new inventory tests), build and cloud bundle smoke test passed; 320/390/1280px viewport checks passed. Production migration created only new inventory tables/default null buckets; existing cloud snapshot and revision were compared unchanged. Device execution imports were tested locally, not with a real pump. GPT response wording still depends on the GPT following its read-only schema/policy.
+Version 1.3.0 adds the corrected capacity migration, shared day-alert classifier, zero-default reserve and editable day thresholds. Tests cover raw threshold boundaries, the 100mL examples, missing/zero/invalid rates, migrated history preservation, custom capacities, capacity limits, reserve, API/UI/GPT consistency and idempotent replenishment/reconciliation. Device imports are tested locally, not with a real pump. GPT response wording still depends on the GPT following its read-only schema/policy.

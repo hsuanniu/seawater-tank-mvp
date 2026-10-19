@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import test, { before, after, beforeEach } from "node:test";
 import { PGlite } from "@electric-sql/pglite";
 import { createReservoir, calculateReservoir, applyReservoirOperation, reservoirView, ingestDosingHistory } from "../engines/reservoirEngine.js";
-import { reservoirDose, dosingChanges } from "../modules/reservoirModule.js";
+import { DEFAULT_RESERVOIRS, reservoirDose, dosingChanges } from "../modules/reservoirModule.js";
+import { evaluateReservoirAvailability, validReservoirAlertDays } from "../engines/reservoirAlertEngine.js";
+import { migrateReservoirInventory } from "../migrations/001_reservoir_inventory.js";
+import { migrateReservoirDayAlerts } from "../migrations/002_reservoir_day_alerts.js";
 import { createCloudRepository } from "../server/cloudRepository.js";
 import { createReservoirRepository } from "../server/reservoirRepository.js";
 import { createReefCloudHandler } from "../server/cloudHandler.js";
@@ -17,14 +20,14 @@ function base(amount = 1000, capacityMl = 1000) {
   return applyReservoirOperation(r, { type: "calibrate", amountMl: amount, idempotencyKey: "baseline" }, day(0)).reservoir;
 }
 
-test("Null baseline stays uninitialized; ten days consume 200mL, exactly 80% does not warn", () => {
+test("Null baseline stays uninitialized; percentages never determine days-based alerts", () => {
   const empty = createReservoir({ id: "a", tankId: "t", name: "KH", doseKey: "kh", capacityMl: 1000 }, dose(), day(0));
   assert.equal(reservoirView(calculateReservoir(empty, day(10))).remainingMl, null);
   const r = calculateReservoir(base(), day(10));
   assert.equal(r.remainingMl, 800);
   assert.equal(reservoirView(r).percentage, 80);
   assert.equal(reservoirView(r).alertStatus, "normal");
-  assert.equal(reservoirView(calculateReservoir(r, day(11))).alertStatus, "low");
+  assert.equal(reservoirView(calculateReservoir(r, day(11))).alertStatus, "normal");
   assert.equal(calculateReservoir(r, day(11)).remainingMl, 780);
   assert.deepEqual(calculateReservoir(r, day(10)), r);
 });
@@ -73,9 +76,9 @@ test("Capacity never fills a reservoir and reducing below remaining requires exp
   assert.throws(() => applyReservoirOperation(r, { type: "refill", amountMl: 2000, idempotencyKey: "overflow" }, day(0)), /CAPACITY_EXCEEDED/);
 });
 
-test("A+ and K+ 500mL warn strictly below 400mL; tracking pause and depletion are bounded", () => {
-  assert.equal(reservoirView(base(400, 500)).alertStatus, "normal");
-  assert.equal(reservoirView(base(399, 500)).alertStatus, "low");
+test("Low percentages do not override day forecasts; tracking pause and depletion are bounded", () => {
+  assert.equal(reservoirView(base(400, 500)).alertStatus, "reminder");
+  assert.equal(reservoirView(base(399, 500)).alertStatus, "reminder");
   const paused = applyReservoirOperation(base(50), { type: "tracking", active: false, idempotencyKey: "pause" }, day(1)).reservoir;
   assert.equal(calculateReservoir(paused, day(10)).remainingMl, 30);
   assert.equal(calculateReservoir(base(50), day(10)).remainingMl, 0);
@@ -108,7 +111,7 @@ before(async () => {
 after(async () => { await db.close(); });
 beforeEach(async () => {
   clock = start;
-  await db.exec("DROP TABLE IF EXISTS reservoir_operations, reservoir_alerts, reservoir_transactions, dosing_reservoirs, reef_inventory_revision, reef_controller_sessions, reef_controller_state CASCADE");
+  await db.exec("DROP TABLE IF EXISTS reservoir_operations, reservoir_alerts, reservoir_transactions, dosing_reservoirs, reef_inventory_revision, reef_inventory_migrations, reef_controller_sessions, reef_controller_state CASCADE");
   cloud = createCloudRepository(sql, { now: () => clock });
   inventory = createReservoirRepository(sql, cloud, { now: () => clock });
   await cloud.initialize({ activeTankId: "tank-1", tanks: [{ id: "tank-1", tank: { name: "Reef", volume: 75 }, dosing: dose(), records: [
@@ -140,13 +143,16 @@ test("SQL replay is idempotent, concurrent refills are serialized, alert episode
   assert.equal((await kh()).remainingMl, 800);
   clock += 86400000;
   assert.equal((await kh()).remainingMl, 780);
+  assert.equal((await kh()).alertStatus, "normal");
+  clock += 10 * 86400000;
+  assert.equal((await kh()).remainingMl, 580);
   assert.equal((await db.query("SELECT * FROM reservoir_alerts WHERE resolved_at IS NULL")).rows.length, 1);
   await inventory.reconcile();
   assert.equal((await db.query("SELECT * FROM reservoir_alerts")).rows.length, 1);
   const refillKey = "stable-refill-key";
   await op(r.id, "refill", { amountMl: 50 }, refillKey);
   await op(r.id, "refill", { amountMl: 50 }, refillKey);
-  assert.equal((await kh()).remainingMl, 830);
+  assert.equal((await kh()).remainingMl, 630);
   await assert.rejects(() => op(r.id, "refill", { amountMl: 20 }, refillKey), /IDEMPOTENCY_KEY_REUSED/);
   assert.equal((await db.query("SELECT * FROM reservoir_alerts WHERE resolved_at IS NULL")).rows.length, 0);
   // Concurrent callers both start from the same revision; one must reload after losing the CAS.
@@ -154,9 +160,9 @@ test("SQL replay is idempotent, concurrent refills are serialized, alert episode
   const b = op(r.id, "refill", { amountMl: 10 });
   await a;
   await b;
-  assert.equal((await kh()).remainingMl, 850);
+  assert.equal((await kh()).remainingMl, 650);
   clock += 3 * 86400000;
-  assert.equal((await kh()).remainingMl, 790);
+  assert.equal((await kh()).remainingMl, 590);
   assert.equal((await db.query("SELECT * FROM reservoir_alerts")).rows.length, 2);
 });
 
@@ -197,7 +203,7 @@ test("Inventory operations do not alter dosing; multi-tank scope and deleted def
 
 test("GPT context includes all five buckets and warnings without inventing any disallowed dose", async () => {
   const r = await kh();
-  await op(r.id, "calibrate", { amountMl: 750 });
+  await op(r.id, "calibrate", { amountMl: 100 });
   const app = createReefCloudHandler({ repository: cloud, inventory, readToken: "b".repeat(64), adminPassword: "a".repeat(32),
     appOrigin: "https://app.example.com", publicUrl: "https://api.example.com", cronSecret: "cron-private", now: () => clock });
   const req = (path, token) => new Request(`https://api.example.com${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
@@ -263,7 +269,7 @@ test("Concurrent duplicate operation returns once, and a revised threshold can r
   const b = op(r.id, "refill", { amountMl: 100 }, "same-request");
   await a; await b;
   assert.equal((await kh()).remainingMl, 450);
-  await op(r.id, "threshold", { warningThreshold: 40 });
+  await op(r.id, "threshold", { alertThresholds: { reminderDays: 20, warningDays: 10, urgentDays: 5 } });
   assert.equal((await kh()).alertStatus, "normal");
   assert.equal((await db.query("SELECT * FROM reservoir_alerts WHERE resolved_at IS NULL")).rows.length, 0);
 });
@@ -304,4 +310,208 @@ test("Inventory audit sorts numeric sequences correctly beyond nine entries", as
   assert.ok(sequences.every((value, i) => i === 0 || value < sequences[i - 1]));
   const earlier = await inventory.history("tank-1", r.id, page.entries[4].sequence);
   assert.equal(earlier.entries[0].sequence, page.entries[5].sequence);
+});
+
+test("100mL at 10/4/0.4mL daily gives warning/reminder/normal with 10/25/250 raw days", () => {
+  for (const [effectiveMlPerDay, expectedDays, expectedStatus] of [[10, 10, "warning"], [4, 25, "reminder"], [0.4, 250, "normal"]]) {
+    const result = evaluateReservoirAvailability({ remainingMl: 100, effectiveMlPerDay });
+    assert.equal(result.estimatedDaysRemaining, expectedDays);
+    assert.equal(result.alertStatus, expectedStatus);
+  }
+});
+
+test("Day thresholds have complete, unrounded 30/14/7 boundaries", () => {
+  for (const [days, status] of [[30.00000001, "normal"], [30, "reminder"], [29.99999999, "reminder"],
+    [14.00000001, "reminder"], [14, "warning"], [13.99999999, "warning"],
+    [7.00000001, "warning"], [7, "urgent"], [6.99999999, "urgent"], [0, "urgent"]]) {
+    const result = evaluateReservoirAvailability({ remainingMl: days, effectiveMlPerDay: 1 });
+    assert.equal(result.alertStatus, status, `${days} days`);
+    assert.equal(result.estimatedDaysRemaining, days);
+  }
+  const r = base(100);
+  r.observedDosing = reservoirDose(dose(100 / 7.00000001), "kh");
+  assert.ok(reservoirView(r).estimatedDaysRemaining > 7);
+  assert.equal(reservoirView(r).alertStatus, "warning");
+});
+
+test("Zero, missing stock, invalid doses and data gaps are never misclassified as normal", () => {
+  assert.equal(evaluateReservoirAvailability({ remainingMl: null, effectiveMlPerDay: 10 }).alertLabel, "待設定");
+  const zero = evaluateReservoirAvailability({ remainingMl: 100, effectiveMlPerDay: 0 });
+  assert.equal(zero.alertLabel, "未滴定");
+  assert.equal(zero.estimatedDaysRemaining, null);
+  assert.equal(zero.requiresAlert, false);
+  for (const invalid of [undefined, null, NaN, Infinity, -1, "", "wrong", true, {}, [4]]) {
+    const setting = reservoirDose({ kh: invalid }, "kh");
+    assert.equal(setting.effectiveMlPerDay, null);
+    assert.equal(evaluateReservoirAvailability({ remainingMl: 100, effectiveMlPerDay: setting.effectiveMlPerDay }).alertStatus, "unavailable");
+  }
+  assert.equal(evaluateReservoirAvailability({ remainingMl: 100, effectiveMlPerDay: 10, remainingIsUpperBound: true }).alertStatus, "needs_confirmation");
+  const unknown = createReservoir({ id: "unknown", tankId: "t", name: "KH", doseKey: "kh", capacityMl: 1500 }, {}, day(0));
+  const confirmed = applyReservoirOperation(unknown, { type: "calibrate", amountMl: 100, idempotencyKey: "init" }, day(0)).reservoir;
+  const later = calculateReservoir(confirmed, day(5));
+  assert.equal(later.remainingMl, 100);
+  assert.equal(reservoirView(later).alertStatus, "unavailable");
+});
+
+test("Bottom reserve changes usable stock, not physical stock, and validates against editable capacity", () => {
+  const r = applyReservoirOperation(base(100), { type: "reserve", bottomReserveMl: 20, idempotencyKey: "reserve" }, day(0)).reservoir;
+  assert.equal(r.remainingMl, 100);
+  assert.equal(reservoirView(r).usableMl, 80);
+  assert.equal(reservoirView(r).estimatedDaysRemaining, 4);
+  assert.equal(reservoirView(r).alertStatus, "urgent");
+  assert.throws(() => applyReservoirOperation(r, { type: "reserve", bottomReserveMl: 1001, idempotencyKey: "bad" }, day(0)), /INVALID_INVENTORY_INPUT/);
+  assert.throws(() => applyReservoirOperation(r, { type: "capacity", capacityMl: 10, idempotencyKey: "small" }, day(0)), /RESERVE_EXCEEDS_CAPACITY/);
+  for (const stock of [20, 10, 0]) {
+    const result = evaluateReservoirAvailability({ remainingMl: stock, bottomReserveMl: 20, effectiveMlPerDay: 1 });
+    assert.equal(result.usableMl, 0);
+    assert.equal(result.alertStatus, "urgent");
+  }
+});
+
+test("ml/day is a full daily total and is not multiplied by the number of pump executions", () => {
+  const dosing = { kh: 3 + 4 + 3 };
+  assert.equal(reservoirDose(dosing, "kh").effectiveMlPerDay, 10);
+  assert.equal(evaluateReservoirAvailability({ remainingMl: 100, effectiveMlPerDay: reservoirDose(dosing, "kh").effectiveMlPerDay }).estimatedDaysRemaining, 10);
+  dosing.status = { kh: { enabled: false } };
+  assert.equal(reservoirDose(dosing, "kh").effectiveMlPerDay, 0);
+});
+
+test("Editable day thresholds reject equal, negative, missing and percentage-only settings", () => {
+  for (const value of [{ reminderDays: 30, warningDays: 30, urgentDays: 7 }, { reminderDays: 10, warningDays: 14, urgentDays: 7 },
+    { reminderDays: 30, warningDays: 14, urgentDays: 0 }, { reminderDays: Infinity, warningDays: 14, urgentDays: 7 }, { reminderDays: 30 }]) {
+    assert.equal(Boolean(validReservoirAlertDays(value)), false);
+    assert.throws(() => applyReservoirOperation(base(), { type: "threshold", alertThresholds: value, idempotencyKey: "invalid" }, day(0)), /INVALID_INVENTORY_ALERT_DAYS/);
+  }
+  assert.throws(() => applyReservoirOperation(base(), { type: "threshold", warningThreshold: 80, idempotencyKey: "old-percent" }, day(0)), /INVALID_INVENTORY_ALERT_DAYS/);
+  assert.equal(validReservoirAlertDays({ reminderDays: 40, warningDays: 20, urgentDays: 10 }), true);
+});
+
+test("All five default buckets accept their full corrected capacity and reject any excess", async () => {
+  const rows = (await inventory.list("tank-1")).reservoirs;
+  assert.deepEqual(rows.map((r) => r.capacityMl), [1500, 1500, 1500, 800, 800]);
+  for (const r of rows) {
+    await op(r.id, "calibrate", { amountMl: r.capacityMl });
+    await assert.rejects(() => op(r.id, "calibrate", { amountMl: r.capacityMl + 0.1 }), /INVALID_INVENTORY_INPUT/);
+    await assert.rejects(() => op(r.id, "refill", { amountMl: 1 }), /CAPACITY_EXCEEDED|CONFIRMATION_REQUIRED/);
+    assert.equal((await inventory.list("tank-1")).reservoirs.find((item) => item.id === r.id).remainingMl, r.capacityMl);
+  }
+});
+
+test("Reserve/refill/calibration instantly update day alerts with no repeated deductions", async () => {
+  const r = await kh();
+  await op(r.id, "calibrate", { amountMl: 100 });
+  assert.equal((await kh()).alertStatus, "urgent");
+  await op(r.id, "refill", { amountMl: 300 }, "one-fill");
+  await op(r.id, "refill", { amountMl: 300 }, "one-fill");
+  assert.equal((await kh()).remainingMl, 400);
+  assert.equal((await kh()).alertStatus, "reminder");
+  await op(r.id, "reserve", { bottomReserveMl: 200 });
+  assert.equal((await kh()).estimatedDaysRemaining, 10);
+  assert.equal((await kh()).alertStatus, "warning");
+  await op(r.id, "calibrate", { amountMl: 1000 });
+  assert.equal((await kh()).estimatedDaysRemaining, 40);
+  assert.equal((await kh()).alertStatus, "normal");
+  assert.equal((await kh()).remainingMl, 1000);
+});
+
+test("Alert severity escalates within one episode without duplicate notifications", async () => {
+  const r = await kh();
+  await op(r.id, "calibrate", { amountMl: 600 });
+  const first = (await db.query("SELECT * FROM reservoir_alerts WHERE resolved_at IS NULL")).rows[0];
+  assert.equal(first.data.level, "reminder");
+  clock += 16 * 86400000;
+  assert.equal((await kh()).alertStatus, "warning");
+  clock += 7 * 86400000;
+  assert.equal((await kh()).alertStatus, "urgent");
+  await inventory.reconcile();
+  const alerts = (await db.query("SELECT * FROM reservoir_alerts")).rows;
+  assert.equal(alerts.length, 1);
+  assert.equal(alerts[0].id, first.id);
+  assert.equal(alerts[0].data.severityChanges.length, 2);
+});
+
+test("Legacy capacity migration preserves stock, dosing, schedules and all previous audit records", async () => {
+  await cloud.libraryId();
+  await migrateReservoirInventory(sql);
+  const original = [];
+  const beforeCloud = await cloud.load();
+  const at = new Date(Date.now() - 86400000).toISOString();
+  for (const definition of DEFAULT_RESERVOIRS) {
+    const capacityMl = ["aplus", "kplus"].includes(definition.doseKey) ? 500 : 1000;
+    let r = createReservoir({ ...definition, capacityMl, id: `legacy-${definition.doseKey}`, tankId: "tank-1" }, { [definition.doseKey]: 4 }, at);
+    r = applyReservoirOperation(r, { type: "calibrate", amountMl: 300, idempotencyKey: `confirm-${r.id}` }, at).reservoir;
+    r = applyReservoirOperation(r, { type: "refill", amountMl: 50, idempotencyKey: `refill-${r.id}` }, at).reservoir;
+    delete r.alertThresholds; delete r.bottomReserveMl; r.warningThreshold = 80;
+    await sql`INSERT INTO dosing_reservoirs(id,tank_id,name,dose_key,capacity_ml,remaining_ml,warning_threshold,active,data)
+      VALUES (${r.id},${r.tankId},${r.name},${r.doseKey},${capacityMl},${r.remainingMl},80,true,${JSON.stringify(r)}::jsonb)`;
+    await sql`INSERT INTO reservoir_transactions(id,tank_id,reservoir_id,type,occurred_at,local_date,source,amount_ml,before_ml,after_ml,metadata)
+      VALUES (${`old-${r.id}`},${r.tankId},${r.id},'refill',${at}::timestamptz,'2026-10-18','manual_app',50,300,350,'{}'::jsonb)`;
+    original.push(r);
+  }
+  await sql`INSERT INTO reservoir_alerts(id,tank_id,reservoir_id,opened_at,data)
+    VALUES ('old-percent-alert','tank-1','legacy-kh',${at}::timestamptz,'{"id":"old-percent-alert","threshold":80}'::jsonb)`;
+  const beforeAudit = (await db.query("SELECT * FROM reservoir_transactions ORDER BY sequence")).rows;
+  await migrateReservoirDayAlerts(sql);
+  const after = (await db.query("SELECT data FROM dosing_reservoirs ORDER BY dose_key")).rows.map((row) => row.data);
+  for (const r of after) {
+    const prior = original.find((old) => old.id === r.id);
+    assert.equal(r.capacityMl, DEFAULT_RESERVOIRS.find((d) => d.doseKey === r.doseKey).capacityMl);
+    assert.equal(r.remainingMl, prior.remainingMl);
+    assert.equal(r.initialCapacityMl, prior.initialCapacityMl);
+    assert.equal(r.lastManualConfirmedAt, prior.lastManualConfirmedAt);
+    assert.equal(r.lastCalculatedAt, prior.lastCalculatedAt);
+    assert.deepEqual(r.schedule, prior.schedule);
+    assert.deepEqual(r.dailyConsumption, prior.dailyConsumption);
+    assert.deepEqual(r.manualEvents.slice(0, -1), prior.manualEvents);
+    assert.equal(r.bottomReserveMl, 0);
+    const migratedAt = r.manualEvents.at(-1).at;
+    assert.equal(calculateReservoir(r, migratedAt).remainingMl, calculateReservoir(prior, migratedAt).remainingMl);
+  }
+  assert.deepEqual((await db.query("SELECT * FROM reservoir_transactions WHERE source = 'manual_app' ORDER BY sequence")).rows, beforeAudit);
+  assert.deepEqual(await cloud.load(), beforeCloud);
+  assert.equal((await db.query("SELECT * FROM reservoir_alerts WHERE resolved_at IS NULL")).rows.length, 0);
+  const once = (await db.query("SELECT * FROM dosing_reservoirs ORDER BY id")).rows;
+  await migrateReservoirDayAlerts(sql);
+  assert.deepEqual((await db.query("SELECT * FROM dosing_reservoirs ORDER BY id")).rows, once);
+  assert.equal((await db.query("SELECT * FROM reservoir_transactions WHERE source = 'migration_002'")).rows.length, 5);
+});
+
+test("Database constraints reject excessive stock and invalid reserve/day thresholds", async () => {
+  const r = await kh();
+  await assert.rejects(() => sql`UPDATE dosing_reservoirs SET remaining_ml = 1501 WHERE id = ${r.id}`, /check constraint/i);
+  await assert.rejects(() => sql`UPDATE dosing_reservoirs SET bottom_reserve_ml = 1501 WHERE id = ${r.id}`, /check constraint/i);
+  await assert.rejects(() => sql`UPDATE dosing_reservoirs SET urgent_days = 14 WHERE id = ${r.id}`, /check constraint/i);
+});
+
+test("User-edited capacities are not overwritten by the one-time default correction", async () => {
+  await cloud.libraryId();
+  await migrateReservoirInventory(sql);
+  const r = applyReservoirOperation(base(350), { type: "capacity", capacityMl: 2000, idempotencyKey: "custom-capacity" }, day(0)).reservoir;
+  await sql`INSERT INTO dosing_reservoirs(id,tank_id,name,dose_key,capacity_ml,remaining_ml,warning_threshold,active,data)
+    VALUES (${r.id},${r.tankId},${r.name},${r.doseKey},2000,350,80,true,${JSON.stringify(r)}::jsonb)`;
+  await migrateReservoirDayAlerts(sql);
+  const after = (await sql`SELECT data FROM dosing_reservoirs WHERE id = ${r.id}`)[0].data;
+  assert.equal(after.capacityMl, 2000);
+  assert.equal(after.remainingMl, 350);
+  assert.deepEqual(after.manualEvents, r.manualEvents);
+});
+
+test("Management API validates day settings and GPT uses the same alert result as the UI API", async () => {
+  const r = await kh();
+  const password = "a".repeat(32), readToken = "b".repeat(64);
+  const app = createReefCloudHandler({ repository: cloud, inventory, adminPassword: password, readToken,
+    appOrigin: "https://app.example.com", publicUrl: "https://api.example.com", now: () => clock });
+  const req = (path, method = "GET", token = "", body) => new Request(`https://api.example.com${path}`, { method,
+    headers: { Authorization: `Bearer ${token}`, ...(body ? { "Content-Type": "application/json" } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
+  const session = await (await app(req("/api/internal/session", "POST", "", { password }))).json();
+  assert.equal((await app(req("/api/internal/reservoirs/tank-1/operations", "POST", session.token,
+    { type: "threshold", reservoirId: r.id, idempotencyKey: "bad-days", alertThresholds: { reminderDays: 7, warningDays: 14, urgentDays: 30 } }))).status, 400);
+  await op(r.id, "calibrate", { amountMl: 100 });
+  const ui = await (await app(req("/api/internal/reservoirs/tank-1", "GET", session.token))).json();
+  const gpt = await (await app(req("/api/gpt/context", "GET", readToken))).json();
+  assert.deepEqual(gpt.reservoirInventory.reservoirs.find((e) => e.id === r.id), {
+    ...ui.reservoirs.find((e) => e.id === r.id), daysAtApprovedSuggestedDose: null, availabilityAtApprovedSuggestedDose: null, approvedSuggestionInventoryWarning: null,
+  });
+  assert.equal(gpt.reservoirInventory.alertPolicy, "estimated_usable_days");
+  assert.equal(gpt.reservoirInventory.defaultWarningThreshold, undefined);
 });

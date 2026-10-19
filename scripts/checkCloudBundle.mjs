@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { access, readFile } from "node:fs/promises";
 
 const bundle = new URL("../.vercel/output/functions/api/index.func/", import.meta.url);
-for (const file of ["analysisEngine.js", "stabilityEngine.js", "safetyEngine.js", "eventRecoveryEngine.js", "reservoirEngine.js"]) {
+for (const file of ["analysisEngine.js", "stabilityEngine.js", "safetyEngine.js", "eventRecoveryEngine.js", "reservoirEngine.js", "reservoirAlertEngine.js"]) {
   await access(new URL(`engines/${file}`, bundle));
 }
 const { default: api } = await import(new URL("api/index.js", bundle));
@@ -21,6 +21,7 @@ assert.equal(document.openapi, "3.1.0");
 assert.deepEqual(document.components.schemas, {}, "GPT Actions requires an object schemas section");
 assert.ok(document.paths["/context"].get.responses["200"].content["application/json"].schema.properties.reservoirInventory);
 await access(new URL("migrations/001_reservoir_inventory.js", bundle));
+await access(new URL("migrations/002_reservoir_day_alerts.js", bundle));
 const query = await api.fetch(new Request("http://localhost:10000/api/openapi?owner=someone-else"));
 assert.equal(query.status, 400);
 console.log("Cloud bundle verified: engines included, routes preserve paths without query injection, and API starts without reading tank data.");
