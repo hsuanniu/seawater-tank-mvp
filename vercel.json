@@ -6,6 +6,10 @@
   "outputDirectory": "cloud-public",
   "regions": ["sin1"],
   "functions": {
+    "api/mcp.js": {
+      "maxDuration": 30,
+      "includeFiles": "engines/**"
+    },
     "api/index.js": {
       "maxDuration": 30,
       "includeFiles": "engines/**"
@@ -15,6 +19,9 @@
     { "path": "/api/internal/reservoirs/reconcile", "schedule": "0 16 * * *" }
   ],
   "routes": [
+    { "src": "^/api/mcp$", "dest": "/api/mcp" },
+    { "src": "^/(?:authorize|token|register|revoke)$", "dest": "/api/mcp" },
+    { "src": "^/\\.well-known/(?:oauth-authorization-server|oauth-protected-resource/api/mcp)$", "dest": "/api/mcp" },
     { "src": "^/api(?:/.*)?$", "dest": "/api" },
     { "src": "^/healthz$", "dest": "/api" },
     { "handle": "filesystem" }

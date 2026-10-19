@@ -1,10 +1,12 @@
 {
   "name": "seawater-tank-mvp",
-  "version": "1.3.1",
+  "version": "1.4.0",
   "displayName": "Seawater Tank",
   "private": true,
   "type": "module",
-  "engines": { "node": "24.x" },
+  "engines": {
+    "node": "24.x"
+  },
   "scripts": {
     "lint": "node --check app.js && node --check app.module.js && node --check sw.js && node --check components/aiExplanationModule.js && node --check components/appVersionFooter.js && node --check components/dashboardModule.js && node --check components/measurementSopComponent.js && node --check engines/analysisEngine.js && node --check engines/eventRecoveryEngine.js && node --check engines/safetyEngine.js && node --check engines/stabilityEngine.js && node --check modules/additiveLogModule.js && node --check modules/bioLoadModule.js && node --check modules/dosingModule.js && node --check modules/eventTimelineModule.js && node --check modules/feedingLogModule.js && node --check modules/measurementModule.js && node --check modules/measurementSopModule.js && node --check modules/tankModule.js && node --check services/backupService.js && node --check services/formatService.js && node --check services/retentionService.js && node --check services/storageService.js && node --check services/tankStore.js && node --check scripts/generateVersionMetadata.mjs && node --check tests/eventTimeline.test.mjs && node --check tests/measurementSop.test.mjs && node --check tests/stability.test.mjs",
     "prebuild": "node scripts/generateVersionMetadata.mjs && node scripts/generateCloudConfig.mjs",
@@ -14,11 +16,16 @@
     "lint:inventory": "node --check modules/reservoirModule.js && node --check engines/reservoirEngine.js && node --check engines/reservoirAlertEngine.js && node --check migrations/001_reservoir_inventory.js && node --check migrations/002_reservoir_day_alerts.js && node --check server/reservoirRepository.js && node --check components/reservoirComponent.js && node --check scripts/migrateReservoirs.mjs",
     "lint:gpt": "node --check services/reefGptContextService.js && node --check services/reefGptApiService.js && node --check supabase/functions/reef-gpt/index.ts && node --check tests/reefGpt.test.mjs",
     "lint:cloud": "node --check services/cloudConfigService.js && node --check services/cloudSyncService.js && node --check services/adminCloudService.js && node --check components/cloudSyncComponent.js && node --check scripts/generateCloudConfig.mjs && node --check scripts/checkCloudBundle.mjs && node --check api/index.js && node --check server/index.js && node --check server/cloudHandler.js && node --check server/cloudRepository.js && node --check tests/cloudSync.test.mjs && node --check tests/adminCloud.test.mjs",
-    "build": "npm run lint && npm run lint:gpt && npm run lint:cloud && npm run lint:inventory && npm test",
+    "lint:mcp": "node --check api/mcp.js && node --check server/reefMcpServer.js && node --check server/mcpAuthProvider.js && node --check server/mcpAuthRepository.js && node --check migrations/003_mcp_authorization.js && node --check scripts/migrateMcpAuth.mjs",
+    "db:migrate:mcp": "node --env-file-if-exists=.env.local scripts/migrateMcpAuth.mjs",
+    "build": "npm run lint && npm run lint:gpt && npm run lint:cloud && npm run lint:inventory && npm run lint:mcp && npm test",
     "test": "node --test tests/*.test.mjs"
   },
   "dependencies": {
-    "@neondatabase/serverless": "^1.2.0"
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "@neondatabase/serverless": "^1.2.0",
+    "express": "^5.3.0",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.8"

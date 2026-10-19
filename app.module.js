@@ -23,8 +23,8 @@ import { loadJson, saveJson } from "./services/storageService.js";
 const STORAGE_KEY = "seawaterTankMvp.v4";
 const APP_VERSION_STORAGE_KEY = "seawaterTankAppVersion.v1";
 const FALLBACK_VERSION = {
-  version: "1.3.1",
-  current_version: "1.3.1",
+  version: "1.4.0",
+  current_version: "1.4.0",
   build_time: "2026-10-15T00:00:00+08:00",
 };
 const DEBUG_MODE = false;

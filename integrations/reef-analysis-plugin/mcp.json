@@ -1,0 +1,18 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "reef-tank-cloud": {
+      "type": "streamable-http",
+      "url": "https://reef-tank-cloud.vercel.app/api/mcp",
+      "extensions": {
+        "com.openai": {
+          "auth": {
+            "type": "oauth",
+            "client": { "mode": "dcr" },
+            "baseScopes": ["reef:read"]
+          }
+        }
+      }
+    }
+  }
+}

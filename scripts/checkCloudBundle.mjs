@@ -24,4 +24,13 @@ await access(new URL("migrations/001_reservoir_inventory.js", bundle));
 await access(new URL("migrations/002_reservoir_day_alerts.js", bundle));
 const query = await api.fetch(new Request("http://localhost:10000/api/openapi?owner=someone-else"));
 assert.equal(query.status, 400);
-console.log("Cloud bundle verified: engines included, routes preserve paths without query injection, and API starts without reading tank data.");
+const mcpBundle = new URL("../.vercel/output/functions/api/mcp.func/", import.meta.url);
+for (const file of ["server/reefMcpServer.js", "server/mcpAuthProvider.js", "server/mcpAuthRepository.js", "migrations/003_mcp_authorization.js", "engines/safetyEngine.js"]) await access(new URL(file, mcpBundle));
+const mcp = await import(new URL("api/mcp.js", mcpBundle));
+assert.equal(typeof mcp.default, "function");
+for (const path of ["/api/mcp", "/authorize", "/token", "/register", "/revoke", "/.well-known/oauth-authorization-server", "/.well-known/oauth-protected-resource/api/mcp"]) {
+  const route = output.routes.find((entry) => entry.src && new RegExp(entry.src).test(path));
+  assert.equal(route?.dest, "/api/mcp", `${path} must reach MCP without changing its original path`);
+}
+await access(new URL("../.vercel/output/static/reef-clownfish.png", import.meta.url));
+console.log("Cloud bundles verified: original REST routes preserved, authenticated MCP and OAuth routes included, and engines load without reading tank data.");

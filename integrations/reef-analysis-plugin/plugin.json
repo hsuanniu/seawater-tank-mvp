@@ -1,0 +1,22 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "author": { "name": "HAO HSUAN NIU" },
+  "description": "Instructions for 海水缸分析庫.",
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "capabilities": ["skills"],
+        "category": "Education & Research",
+        "composerIcon": "./assets/gpt-icon.png",
+        "defaultPrompt": [],
+        "developerName": "HAO HSUAN NIU",
+        "displayName": "海水缸分析庫",
+        "logo": "./assets/gpt-icon.png",
+        "longDescription": "Instructions for 海水缸分析庫.",
+        "shortDescription": "Instructions for 海水缸分析庫."
+      }
+    }
+  },
+  "name": "gpt-8809478112d2cabd8d99111ff573e5ad",
+  "version": "0.2.0"
+}
