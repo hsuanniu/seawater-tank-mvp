@@ -107,14 +107,13 @@ button {
 }
 
 .brand-mark {
-  display: grid;
+  display: block;
   width: 40px;
   height: 40px;
-  place-items: center;
+  flex: 0 0 40px;
+  object-fit: cover;
   border-radius: 12px;
-  background: linear-gradient(135deg, var(--blue), var(--mint));
-  color: #fff;
-  font-weight: 800;
+  background: #003440;
   box-shadow: 0 12px 24px rgba(8, 127, 160, 0.22);
 }
 

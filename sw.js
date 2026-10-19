@@ -1,4 +1,4 @@
-const CACHE_NAME = "seawater-tank-mvp-v47";
+const CACHE_NAME = "seawater-tank-mvp-v48";
 const APP_SHELL = [
   "./",
   "index.html",
@@ -36,8 +36,10 @@ const APP_SHELL = [
   "components/reservoirComponent.js",
   "engines/reservoirAlertEngine.js",
   "types/domainTypes.js",
-  "icons/icon-192.svg",
-  "icons/icon-512.svg",
+  "icons/clownfish-32.png",
+  "icons/clownfish-180.png",
+  "icons/clownfish-192.png",
+  "icons/clownfish-512.png",
 ];
 
 self.addEventListener("install", (event) => {
