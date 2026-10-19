@@ -4,6 +4,7 @@ import { renderCloudSyncView } from "./components/cloudSyncComponent.js";
 import { actionText, changeText, confidenceText, dailyDeltaText, doseSuggestionText, formatDoseSentence, primaryFocus } from "./components/dashboardModule.js?v=20260914-dosing-micro-adjust";
 import { createMeasurementSopController } from "./components/measurementSopComponent.js?v=20260617-sop-timer-fix";
 import { createReservoirController } from "./components/reservoirComponent.js";
+import { reservoirFocusMessages, renderReservoirFocus } from "./components/reservoirFocusModule.js";
 import { analyzeTank } from "./engines/analysisEngine.js?v=20260914-dosing-micro-adjust";
 import { additiveLabel, normalizeAdditiveLog } from "./modules/additiveLogModule.js?v=20260520-additive-feeding-log2";
 import { analyzeBioLoadReferences, WEEKDAYS } from "./modules/bioLoadModule.js?v=20260520-additive-feeding-log2";
@@ -23,8 +24,8 @@ import { loadJson, saveJson } from "./services/storageService.js";
 const STORAGE_KEY = "seawaterTankMvp.v4";
 const APP_VERSION_STORAGE_KEY = "seawaterTankAppVersion.v1";
 const FALLBACK_VERSION = {
-  version: "1.5.0",
-  current_version: "1.5.0",
+  version: "1.5.1",
+  current_version: "1.5.1",
   build_time: "2026-10-20T00:00:00+08:00",
 };
 const DEBUG_MODE = false;
@@ -37,6 +38,7 @@ let cloudSetupChecked = false;
 let cloudConnectionError = "";
 let cloudAuthBusy = false;
 let previousCloudFailure = "";
+let reservoirFocusSnapshot = {};
 let suppressCloudSave = false;
 let dosingAutoSaveTimer = null;
 let feedbackTimer = null;
@@ -100,7 +102,8 @@ const CloudSync = createCloudSyncController({
     if (failure && failure !== previousCloudFailure) showToast(failure);
     previousCloudFailure = failure;
     if (status.phase === "connected" && status.pending) scheduleCloudSave();
-    if (status.phase === "connected" && !status.pending && document.querySelector("#dosing").classList.contains("active")) void ReservoirInventory.refresh();
+    renderDashboard();
+    if (status.phase === "connected" && !status.pending && isInventoryPageVisible()) void ReservoirInventory.refresh();
   },
 });
 
@@ -141,6 +144,7 @@ const ReservoirInventory = createReservoirController({
     if (CloudSync.getStatus().pending || CloudSync.getStatus().phase !== "connected") throw new Error("LOCAL_SYNC_REQUIRED");
   },
   onToast: showToast,
+  onChange: (snapshot) => { reservoirFocusSnapshot = snapshot; renderDashboard(); },
 });
 
 function activeTank() {
@@ -722,6 +726,9 @@ function metricCardClass(row, focus) {
 
 function renderDashboard() {
   const analysis = analyze();
+  const reminders = reservoirFocusMessages({ tankId: activeTank()?.id, dosing: activeTank()?.dosing, snapshot: reservoirFocusSnapshot });
+  const urgentInventory = renderReservoirFocus(reminders, true);
+  const generalInventory = renderReservoirFocus(reminders, false);
   document.querySelector("#dashboardMeta").textContent = analysis
     ? latestMeasurementText(analysis.latest.date)
     : "尚未建立紀錄";
@@ -732,9 +739,11 @@ function renderDashboard() {
     focusPanel.innerHTML = `
       <article class="focus-card empty">
         <div>
+          ${urgentInventory}
           <p class="eyebrow">下一步</p>
           <h3>先新增第一筆水質紀錄</h3>
           <p>填入本週測量值後，首頁會顯示狀態、趨勢與滴定建議。</p>
+          ${generalInventory}
         </div>
         <button class="primary-button" data-goto="water">開始記錄</button>
       </article>
@@ -746,9 +755,11 @@ function renderDashboard() {
     focusPanel.innerHTML = `
       <article class="focus-card tone-${tone}">
         <div>
+          ${urgentInventory}
           <p class="eyebrow">本週焦點</p>
           <h3>${focus.label}：${focus.status.text}${focus.trendText !== "無上次資料" ? `，較上次${focus.trendText}` : ""}</h3>
           <p>${focus.doseKey ? formatDoseSentence(focus, doseStatusText) : nutrientFocusText(focus)}</p>
+          ${generalInventory}
         </div>
       </article>
     `;
@@ -1326,7 +1337,7 @@ function renderAll({ forms = true, cloud = true } = {}) {
     return;
   }
   activeTank();
-  if (document.querySelector("#dosing").classList.contains("active")) void ReservoirInventory.refresh();
+  if (isInventoryPageVisible()) void ReservoirInventory.refresh();
   if (forms) renderForms();
   renderDashboard();
   renderAnalysis();
@@ -1409,6 +1420,7 @@ function switchPage(id, { updateRoute = true } = {}) {
   }
   if (id === "analysis") renderAnalysis();
   if (id === "dosing") { renderDosingSavedMeta(); void ReservoirInventory.refresh(); }
+  if (id === "dashboard") { renderDashboard(); void ReservoirInventory.refresh(); }
   if (id === "tank") renderForms();
 }
 
@@ -1506,7 +1518,7 @@ async function connectCloudSession(session) {
     ownerKey: cloudConfiguration.apiUrl + "::" + session.libraryId,
     repository: adminCloudClient.repository,
   });
-  if (document.querySelector("#dosing").classList.contains("active")) void ReservoirInventory.refresh();
+  if (isInventoryPageVisible()) void ReservoirInventory.refresh();
   return connected;
 }
 
@@ -1602,9 +1614,13 @@ async function signOutCloud() {
   finally { renderCloudStatus(); }
 }
 
+function isInventoryPageVisible() {
+  return ["dashboard", "dosing"].some((id) => document.getElementById(id).classList.contains("active"));
+}
+
 function setupEvents() {
   const refreshVisibleInventory = () => {
-    if (!document.hidden && document.querySelector("#dosing").classList.contains("active")) void ReservoirInventory.refresh();
+    if (!document.hidden && isInventoryPageVisible()) void ReservoirInventory.refresh();
   };
   document.addEventListener("visibilitychange", refreshVisibleInventory);
   window.addEventListener("pageshow", refreshVisibleInventory);

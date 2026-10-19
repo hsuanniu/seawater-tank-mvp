@@ -2865,3 +2865,10 @@ th {
 .reservoir-manual-list time { display: block; font-size: 14px; color: var(--muted, #45616d); }
 .reservoir-manual-list p { margin-block: 8px; }
 .reservoir-last-refill { margin: 10px 0 0; font-size: 14px; overflow-wrap: anywhere; }
+
+.focus-card .focus-inventory-alert { display: block; min-height: 44px; margin-top: 12px; padding: 8px 0 8px 10px; border-inline-start: 3px solid currentColor; color: #87440c; font-size: 14px; line-height: 1.6; overflow-wrap: anywhere; text-decoration: none; }
+.focus-card .focus-inventory-alert.is-urgent { color: #922439; font-weight: 650; }
+.focus-card .focus-inventory-alert.is-needs_confirmation { color: #285b6b; }
+.focus-card .focus-inventory-alert.is-urgent:first-child { margin: 0 0 12px; }
+.focus-card .focus-inventory-alert:hover { text-decoration: underline; }
+.focus-card .focus-inventory-alert:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }

@@ -1,6 +1,6 @@
 {
   "name": "seawater-tank-mvp",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "displayName": "Seawater Tank",
   "private": true,
   "type": "module",
@@ -18,8 +18,9 @@
     "lint:cloud": "node --check services/cloudConfigService.js && node --check services/cloudSyncService.js && node --check services/adminCloudService.js && node --check components/cloudSyncComponent.js && node --check scripts/generateCloudConfig.mjs && node --check scripts/checkCloudBundle.mjs && node --check api/index.js && node --check server/index.js && node --check server/cloudHandler.js && node --check server/cloudRepository.js && node --check tests/cloudSync.test.mjs && node --check tests/adminCloud.test.mjs",
     "lint:mcp": "node --check api/mcp.js && node --check server/reefMcpServer.js && node --check server/mcpAuthProvider.js && node --check server/mcpAuthRepository.js && node --check migrations/003_mcp_authorization.js && node --check scripts/migrateMcpAuth.mjs",
     "lint:history": "node --check modules/reservoirHistoryModule.js && node --check services/dosingHistoryService.js && node --check migrations/004_reservoir_history.js && node --check tests/reservoirHistory.test.mjs",
+    "lint:focus": "node --check components/reservoirFocusModule.js && node --check tests/reservoirFocus.test.mjs",
     "db:migrate:mcp": "node --env-file-if-exists=.env.local scripts/migrateMcpAuth.mjs",
-    "build": "npm run lint && npm run lint:gpt && npm run lint:cloud && npm run lint:inventory && npm run lint:mcp && npm run lint:history && npm test",
+    "build": "npm run lint && npm run lint:gpt && npm run lint:cloud && npm run lint:inventory && npm run lint:mcp && npm run lint:history && npm run lint:focus && npm test",
     "test": "node --test tests/*.test.mjs"
   },
   "dependencies": {

@@ -47,7 +47,7 @@ export function renderReservoirManualHistory(r, disabled = false) {
   }).join("");
 }
 
-export function createReservoirController({ root, getTankId, getClient, ensureSynced, onToast }) {
+export function createReservoirController({ root, getTankId, getClient, ensureSynced, onToast, onChange = () => {} }) {
   let tankId = null, result = null, busy = false, error = "", requestVersion = 0, invalidated = false;
   let pending = null;
   const history = new Map();
@@ -78,6 +78,7 @@ export function createReservoirController({ root, getTankId, getClient, ensureSy
           <button class="ghost-button" type="submit">新增</button></form></details>` : ""}
     `;
     root.querySelectorAll("details[data-history-key]").forEach((el) => { el.open = expandedHistory.has(el.dataset.historyKey); });
+    onChange({ tankId, result, busy, error, pending: Boolean(pending), connected: Boolean(getClient()) });
   }
 
   function card(r, open) {
@@ -214,5 +215,5 @@ export function createReservoirController({ root, getTankId, getClient, ensureSy
     }
   });
   render();
-  return { refresh, invalidate() { ++requestVersion; tankId = null; result = null; error = ""; history.clear(); if (busy) invalidated = true; else render(); } };
+  return { refresh, invalidate() { ++requestVersion; tankId = null; result = null; error = ""; history.clear(); if (busy) invalidated = true; render(); } };
 }

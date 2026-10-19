@@ -57,6 +57,12 @@ Re-import the existing `/api/openapi` URL in GPT Actions to update the response 
 
 ## Verification
 
+### Home Focus Reminders (1.5.1)
+
+The existing weekly-focus card consumes the same inventory-controller snapshot as the dosing page. `components/reservoirFocusModule.js` only presents server-provided statuses and raw day estimates; it never deducts inventory or defines a second set of thresholds. Existing 30/14/7-day defaults and per-reservoir custom thresholds remain unchanged. Urgent/depleted messages precede the water focus, while warning/procurement and incomplete-data messages follow it. Normal inventories add no markup. Multiple reservoirs are merged by severity and sorted by raw days. Links navigate to the current tank's existing dosing page.
+
+Both home and dosing pages refresh through the existing authenticated inventory client on navigation, foreground return and completed cloud sync. Refill/calibration responses publish directly to both views. A local dose that does not match the last server snapshot produces a data-update prompt rather than an old day estimate; the completed sync fetches a new forecast using the existing historical consumption timeline. Stopped/zero-dose reservoirs do not generate depletion reminders. Unknown stock/rates, failed reads and unconfirmed operations never become zero stock or a normal status. No new API, migration, notification channel or dosing mutation is introduced. `tests/reservoirFocus.test.mjs` covers presentation, thresholds, selected-tank isolation and the repository's refill/calibration/piecewise-dose update behavior.
+
 Run `npm test`, `npm run build`, then `vercel build --prod` and `npm run test:cloud-bundle` before deploying. `tests/reservoir.test.mjs` covers pure replay and real PostgreSQL semantics through PGlite. Never run calibration/refill fixtures against production.
 
 ## Refill, Calibration and Correction History (1.5.0)
