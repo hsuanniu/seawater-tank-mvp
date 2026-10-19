@@ -1,5 +1,6 @@
 import { DEFAULT_RESERVOIR_ALERT_DAYS, MAX_RESERVOIR_CAPACITY_ML, DOSE_KEYS, reservoirDose, sameReservoirDose } from "../modules/reservoirModule.js";
 import { evaluateReservoirAvailability, validReservoirAlertDays } from "./reservoirAlertEngine.js";
+import { effectiveManualEvents, reservoirManualHistory } from "../modules/reservoirHistoryModule.js";
 
 const DAY = 86400000;
 const OFFSET = 8 * 3600000;
@@ -36,6 +37,7 @@ export function ingestDosingHistory(reservoir, tank, cloudUpdatedAt, at) {
       addGap(r, r.lastObservedAt, at, "滴定變更時間或內容無法確認");
       continue;
     }
+    if (entry.timingUncertain) addGap(r, r.lastObservedAt, entry.effectiveAt, "僅確認雲端設定變更時間，先前實際生效時間不明");
     const preceding = [...r.schedule].filter((e) => time(e.at) <= when).at(-1);
     if (!sameReservoirDose(preceding?.setting, entry.before)) addGap(r, preceding?.at || r.lastObservedAt, entry.effectiveAt, "滴定變更紀錄不連續");
     r.schedule.push({ id: entry.id, at: entry.effectiveAt, setting: entry.after });
@@ -64,24 +66,26 @@ function addGap(r, start, end, reason) {
 }
 
 // Replay from the latest manual baseline. Late, timestamped offline settings correct estimates, not historical rates.
-export function calculateReservoir(reservoir, at) {
+export function calculateReservoir(reservoir, at, { rejectOverflow = false } = {}) {
   const r = structuredClone(reservoir);
   const end = time(at);
-  const baselineIndex = r.manualEvents.findLastIndex((e) => e.type === "calibrate");
+  const events = effectiveManualEvents(r.manualEvents, end);
+  const baselineIndex = events.findLastIndex((e) => e.type === "calibrate");
   r.lastCalculatedAt = at;
   r.dailyConsumption = {};
   if (baselineIndex < 0) return { ...r, remainingMl: null, quality: "uninitialized", relevantGaps: [] };
-  const baseline = r.manualEvents[baselineIndex];
+  const baseline = events[baselineIndex];
   const start = time(baseline.at);
   if (end < start) throw new Error("INVALID_INVENTORY_TIME");
   let remaining = baseline.amountMl;
   let capacity = r.initialCapacityMl;
   let tracking = true;
-  for (const e of r.manualEvents.slice(0, baselineIndex + 1)) {
+  for (const e of events.slice(0, baselineIndex + 1)) {
     if (e.type === "capacity") capacity = e.capacityMl;
     if (e.type === "tracking") tracking = e.active;
   }
-  const manual = r.manualEvents.slice(baselineIndex + 1).filter((e) => time(e.at) <= end);
+  if (rejectOverflow && remaining > capacity + 0.000001) throw new Error("INVENTORY_CORRECTION_CONFLICT");
+  const manual = events.slice(baselineIndex + 1);
   const points = new Set([start, end]);
   for (const e of [...r.schedule, ...manual]) if (time(e.at) >= start && time(e.at) <= end) points.add(time(e.at));
   for (const g of r.dataGaps) for (const v of [g.start, g.end]) if (time(v) > start && time(v) < end) points.add(time(v));
@@ -140,6 +144,7 @@ export function calculateReservoir(reservoir, at) {
       if (e.type === "capacity") capacity = e.capacityMl;
       if (e.type === "tracking") tracking = e.active;
       if (remaining > capacity + 0.000001) {
+        if (rejectOverflow) throw new Error("INVENTORY_CORRECTION_CONFLICT");
         if (!relevantGaps.some((g) => g.reason === "歷史補充與重新計算結果衝突，請校正")) relevantGaps.push({ start: e.at, end: at, reason: "歷史補充與重新計算結果衝突，請校正" });
         remaining = capacity;
       }
@@ -151,18 +156,22 @@ export function calculateReservoir(reservoir, at) {
     quality: relevantGaps.length ? "data_gap" : estimated ? "estimated" : Object.values(r.dailyConsumption).some((b) => b.actualSeconds > 0) ? "actual" : "manually_confirmed" };
 }
 
-export function reservoirView(r) {
+export function reservoirView(r, ledger = []) {
   const dose = r.observedDosing || {};
   const bottomReserveMl = r.bottomReserveMl ?? 0;
   const alertThresholds = r.alertThresholds ?? DEFAULT_RESERVOIR_ALERT_DAYS;
   const percentage = r.remainingMl === null ? null : inventoryRound(r.remainingMl / r.capacityMl * 100);
   const availability = evaluateReservoirAvailability({ remainingMl: r.remainingMl, bottomReserveMl, alertThresholds,
     effectiveMlPerDay: dose.effectiveMlPerDay, trackingActive: r.active, remainingIsUpperBound: r.quality === "data_gap" });
+  const history = reservoirManualHistory(r, ledger);
+  const refillHistory = history.filter((e) => e.type === "refill");
   return { id: r.id, tankId: r.tankId, name: r.name, doseKey: r.doseKey, capacityMl: r.capacityMl,
     remainingMl: r.remainingMl, percentage, bottomReserveMl, alertThresholds: { ...alertThresholds },
     ...dose, trackingActive: r.active, deletedAt: r.deletedAt,
     ...availability,
     lastManualConfirmedAt: r.lastManualConfirmedAt, lastCalculatedAt: r.lastCalculatedAt, lastRefilledAt: r.lastRefilledAt,
+    lastRefill: refillHistory[0] || null, lastRefilledAmountMl: refillHistory[0]?.effectiveAmountMl ?? null,
+    refillHistory, calibrationHistory: history.filter((e) => e.type === "calibrate"),
     quality: r.quality, isEstimate: r.quality === "estimated", remainingIsUpperBound: r.quality === "data_gap",
     dataGaps: r.relevantGaps || [], inventoryMeasurementType: "calculated_not_level_sensor",
     warning: ["normal", "not_dosing", "tracking_disabled"].includes(availability.alertStatus) ? null : `${r.name}：${availability.alertReason}` };
@@ -172,6 +181,12 @@ export function applyReservoirOperation(reservoir, operation, at) {
   let r = calculateReservoir(reservoir, at);
   const before = reservoirView(r);
   const e = { id: operation.idempotencyKey, type: operation.type, at, source: operation.source || "manual_app" };
+  for (const key of ["notes", "reason"]) {
+    if (operation[key] !== undefined && (typeof operation[key] !== "string" || operation[key].length > 1000)) throw new Error("INVALID_INVENTORY_INPUT");
+    if (operation[key] !== undefined) e[key] = operation[key].trim();
+  }
+  e.beforeMl = before.remainingMl;
+  e.beforeQuality = before.quality;
   const validMl = (v, allowZero = true) => typeof v === "number" && Number.isFinite(v) && v >= (allowZero ? 0 : 0.000001) && v <= MAX_RESERVOIR_CAPACITY_ML;
   if (r.deletedAt) throw new Error("RESERVOIR_NOT_FOUND");
   switch (operation.type) {
@@ -186,6 +201,20 @@ export function applyReservoirOperation(reservoir, operation, at) {
       e.amountMl = operation.amountMl;
       r.lastRefilledAt = at;
       break;
+    case "correct": {
+      const target = reservoirManualHistory(r).find((entry) => entry.id === operation.targetEventId && entry.type === operation.targetType);
+      if (!target) throw new Error("INVENTORY_HISTORY_NOT_FOUND");
+      if (operation.expectedRevisionId !== target.revisionId) throw new Error("INVENTORY_HISTORY_CONFLICT");
+      if (!e.reason || !validMl(operation.amountMl, target.type !== "refill")) throw new Error("INVALID_INVENTORY_INPUT");
+      e.targetEventId = target.id;
+      e.targetType = target.type;
+      e.previousAmountMl = target.effectiveAmountMl;
+      e.previousNotes = target.effectiveNotes;
+      e.previousRevisionId = target.revisionId;
+      e.amountMl = operation.amountMl;
+      e.notes = operation.notes === undefined ? target.effectiveNotes : operation.notes.trim();
+      break;
+    }
     case "capacity":
       if (!validMl(operation.capacityMl, false)) throw new Error("INVALID_INVENTORY_INPUT");
       if ((r.bottomReserveMl ?? 0) > operation.capacityMl) throw new Error("INVENTORY_RESERVE_EXCEEDS_CAPACITY");
@@ -233,9 +262,24 @@ export function applyReservoirOperation(reservoir, operation, at) {
   r.manualEvents.push(e);
   if (operation.type === "capacity" && operation.correctedRemainingMl !== undefined) {
     if (!validMl(operation.correctedRemainingMl) || operation.correctedRemainingMl > r.capacityMl) throw new Error("INVALID_INVENTORY_INPUT");
-    r.manualEvents.push({ ...e, type: "calibrate", amountMl: operation.correctedRemainingMl });
+    r.manualEvents.push({ ...e, type: "calibrate", amountMl: operation.correctedRemainingMl,
+      reason: e.reason || "修改容量時確認實際剩餘量" });
     r.lastManualConfirmedAt = at;
   }
-  r = calculateReservoir(r, at);
+  if (operation.type === "correct") {
+    const projected = effectiveManualEvents(r.manualEvents, time(at));
+    const targetIndex = projected.findIndex((event) => event.id === e.targetEventId && event.type === e.targetType);
+    // Validate the corrected timeline, including intervals superseded by a later calibration.
+    for (let index = targetIndex; index < projected.length; index++) {
+      calculateReservoir({ ...r, manualEvents: projected.slice(0, index + 1) }, projected[index].at, { rejectOverflow: true });
+    }
+  }
+  r = calculateReservoir(r, at, { rejectOverflow: operation.type === "correct" });
+  if (operation.type === "correct" && (r.remainingMl > r.capacityMl || r.relevantGaps.some((g) => g.reason === "歷史補充與重新計算結果衝突，請校正"))) {
+    throw new Error("INVENTORY_CORRECTION_CONFLICT");
+  }
+  // The original event remains immutable; every edit is a separate append-only event.
+  for (const event of r.manualEvents) if (event.id === e.id) event.afterMl = r.remainingMl;
+  e.afterMl = r.remainingMl;
   return { reservoir: r, before, after: reservoirView(r), event: e };
 }

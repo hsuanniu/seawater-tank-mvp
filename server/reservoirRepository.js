@@ -1,6 +1,8 @@
 import { randomUUID, createHash } from "node:crypto";
 import { migrateReservoirInventory } from "../migrations/001_reservoir_inventory.js";
 import { migrateReservoirDayAlerts } from "../migrations/002_reservoir_day_alerts.js";
+import { migrateReservoirHistory } from "../migrations/004_reservoir_history.js";
+import { isReefTank, MANUAL_HISTORY_TYPES } from "../modules/reservoirHistoryModule.js";
 import { DEFAULT_RESERVOIRS } from "../modules/reservoirModule.js";
 import { applyReservoirOperation, calculateReservoir, createReservoir, ingestDosingHistory, inventoryRound, reservoirView, taipeiInventoryDate } from "../engines/reservoirEngine.js";
 
@@ -8,11 +10,17 @@ const fingerprint = (value) => createHash("sha256").update(JSON.stringify(value)
 const iso = (value) => new Date(value).toISOString();
 const safeId = (value) => typeof value === "string" && /^[a-zA-Z0-9_-]{1,100}$/.test(value);
 
+function auditSnapshot(view) {
+  const { refillHistory, calibrationHistory, lastRefill, ...snapshot } = view;
+  return snapshot;
+}
+
 export function createReservoirRepository(sql, cloudRepository, { now = () => Date.now() } = {}) {
   let ready;
   const ensureSchema = () => ready ||= (async () => {
     await migrateReservoirInventory(sql);
     await migrateReservoirDayAlerts(sql);
+    await migrateReservoirHistory(sql);
   })().catch((error) => { ready = null; throw error; });
 
   async function load() {
@@ -22,6 +30,10 @@ export function createReservoirRepository(sql, cloudRepository, { now = () => Da
     const rows = await sql`SELECT c.data, c.revision AS cloud_revision, c.updated_at, i.revision,
       COALESCE((SELECT jsonb_agg(r.data) FROM dosing_reservoirs r), '[]'::jsonb) AS reservoirs,
       COALESCE((SELECT jsonb_agg(a.data) FROM reservoir_alerts a WHERE a.resolved_at IS NULL), '[]'::jsonb) AS alerts
+      , COALESCE((SELECT jsonb_agg(jsonb_build_object('reservoir_id', t.reservoir_id, 'type', t.type,
+        'before_ml', t.before_ml, 'after_ml', t.after_ml,
+        'metadata', jsonb_build_object('id', t.metadata->'id', 'before', jsonb_build_object('quality', t.metadata#>'{before,quality}'))))
+        FROM reservoir_transactions t WHERE type IN ('refill', 'calibrate', 'correct')), '[]'::jsonb) AS manual_ledger
       FROM reef_controller_state c CROSS JOIN reef_inventory_revision i WHERE c.id = 'personal' AND i.id = 'personal'`;
     return rows[0];
   }
@@ -48,7 +60,7 @@ export function createReservoirRepository(sql, cloudRepository, { now = () => Da
           return saved[0].response;
         }
       }
-      const tanks = current.data.tanks || [];
+      const tanks = (current.data.tanks || []).filter(isReefTank);
       if (tankId && !tanks.some((tank) => tank.id === tankId)) throw new Error("TANK_NOT_FOUND");
       const all = current.reservoirs;
       const ledger = [];
@@ -95,12 +107,13 @@ export function createReservoirRepository(sql, cloudRepository, { now = () => Da
           r = applied.reservoir;
           ledger.push(transaction(r, operation.type, at, { source: operation.type === "execution" ? "device_import" : "manual_app",
             amount_ml: operation.amountMl ?? null, before_ml: applied.before.remainingMl, after_ml: applied.after.remainingMl,
-            metadata: { ...applied.event, before: applied.before, after: applied.after } }));
+            metadata: { ...applied.event, before: auditSnapshot(applied.before), after: auditSnapshot(applied.after) } }));
           // A late device batch can correct prior estimates without changing any dosing setting.
-          if (operation.type === "execution") for (const [date, bucket] of Object.entries(r.dailyConsumption)) {
+          if (["execution", "correct"].includes(operation.type)) for (const [date, bucket] of Object.entries(r.dailyConsumption)) {
             const before = beforeDaily[date];
-            if (JSON.stringify(before) !== JSON.stringify(bucket)) ledger.push(transaction(r, "execution_reconciliation", at, { local_date: date,
-              amount_ml: inventoryRound(bucket.consumedMl - (before?.consumedMl || 0)), metadata: { baselineId, dailyTotal: bucket, source: "device_complete_coverage" } }));
+            if (JSON.stringify(before) !== JSON.stringify(bucket)) ledger.push(transaction(r, operation.type === "execution" ? "execution_reconciliation" : "consumption_correction", at, { local_date: date,
+              amount_ml: inventoryRound(bucket.consumedMl - (before?.consumedMl || 0)), metadata: { baselineId, dailyTotal: bucket, previousDailyTotal: before || null,
+                source: operation.type === "execution" ? "device_complete_coverage" : "manual_history_correction", correctionId: operation.type === "correct" ? operation.idempotencyKey : null } }));
           }
         }
         const view = reservoirView(r);
@@ -124,7 +137,8 @@ export function createReservoirRepository(sql, cloudRepository, { now = () => Da
       }
       if (operation && !found) throw new Error("RESERVOIR_NOT_FOUND");
       const doseOrder = ["kh", "ca", "mg", "aplus", "kplus", "custom"];
-      const views = all.filter((r) => tanks.some((t) => t.id === r.tankId) && !r.deletedAt).map(reservoirView)
+      const manualLedger = [...(current.manual_ledger || []), ...ledger.filter((row) => MANUAL_HISTORY_TYPES.includes(row.type))];
+      const views = all.filter((r) => tanks.some((t) => t.id === r.tankId) && !r.deletedAt).map((r) => reservoirView(r, manualLedger))
         .sort((a, b) => a.tankId.localeCompare(b.tankId) || doseOrder.indexOf(a.doseKey) - doseOrder.indexOf(b.doseKey) || a.id.localeCompare(b.id));
       const response = { inventoryRevision: Number(current.revision) + 1, calculatedAt: at,
         cloudUpdatedAt: iso(current.updated_at), reservoirs: tankId ? views.filter((r) => r.tankId === tankId) : views };
@@ -188,7 +202,7 @@ export function createReservoirRepository(sql, cloudRepository, { now = () => Da
     async history(tankId, reservoirId, before = "9223372036854775807") {
       if (!safeId(reservoirId) || !/^\d{1,19}$/.test(before) || BigInt(before) > 9223372036854775807n) throw new Error("INVALID_INVENTORY_INPUT");
       const current = await load();
-      if (!current.data?.tanks.some((t) => t.id === tankId)) throw new Error("TANK_NOT_FOUND");
+      if (!current.data?.tanks.some((t) => t.id === tankId && isReefTank(t))) throw new Error("TANK_NOT_FOUND");
       const rows = await sql`SELECT sequence::text, id, type, occurred_at, local_date::text, source, amount_ml, before_ml, after_ml, metadata
         FROM reservoir_transactions WHERE tank_id = ${tankId} AND reservoir_id = ${reservoirId} AND sequence < ${before}::bigint
         ORDER BY reservoir_transactions.sequence DESC LIMIT 101`;

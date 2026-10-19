@@ -1,4 +1,6 @@
 import { randomBytes, createHash } from "node:crypto";
+import { randomUUID } from "node:crypto";
+import { preserveDosingHistory } from "../services/dosingHistoryService.js";
 
 export function hashToken(value) {
   return createHash("sha256").update(value).digest("hex");
@@ -60,7 +62,10 @@ export function createCloudRepository(sql, { now = () => Date.now() } = {}) {
     async save(data, revision) {
       if (!validCloudState(data) || !Number.isSafeInteger(revision) || revision < 1) throw new Error("INVALID_CLOUD_STATE");
       await ensureSchema();
-      const rows = await sql`UPDATE reef_controller_state SET data = ${JSON.stringify(data)}::jsonb,
+      const previous = await this.load();
+      if (!previous || previous.revision !== revision) throw new Error("CLOUD_REVISION_CONFLICT");
+      const saved = preserveDosingHistory(previous.data, data, { at: new Date(now()).toISOString(), createId: randomUUID });
+      const rows = await sql`UPDATE reef_controller_state SET data = ${JSON.stringify(saved)}::jsonb,
         revision = revision + 1, updated_at = NOW()
         WHERE id = 'personal' AND data IS NOT NULL AND revision = ${revision}
         RETURNING data, revision, updated_at`;

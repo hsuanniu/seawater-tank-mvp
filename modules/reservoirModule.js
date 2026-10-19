@@ -35,6 +35,21 @@ export function dosingChanges(before, after, { at, createId, source }) {
   return DOSE_KEYS.flatMap((key) => {
     const previous = reservoirDose(before, key);
     const next = reservoirDose(after, key);
-    return sameReservoirDose(previous, next) ? [] : [{ id: createId(), key, effectiveAt: at, before: previous, after: next, source }];
+    return sameReservoirDose(previous, next) ? [] : [{ id: createId(), key, recordedAt: at, effectiveAt: at,
+      effectiveAtBasis: "system_setting_change", deviceSynchronizedAt: null,
+      before: previous, after: next, source,
+      changeMlPerDay: previous.configuredMlPerDay === null || next.configuredMlPerDay === null ? null
+        : Math.round((next.configuredMlPerDay - previous.configuredMlPerDay) * 1e6) / 1e6 }];
   });
+}
+
+export function dosingHistoryView(entries = []) {
+  return entries.map((e) => ({ ...e, recordedAt: e.recordedAt || null,
+    systemSettingChangedAt: e.effectiveAt || null,
+    effectiveAtBasis: e.effectiveAtBasis || "legacy_setting_time_unverified",
+    deviceSynchronizedAt: e.deviceSynchronizedAt || null,
+    previousMlPerDay: e.before?.configuredMlPerDay ?? null, nextMlPerDay: e.after?.configuredMlPerDay ?? null,
+    changeMlPerDay: Number.isFinite(e.before?.configuredMlPerDay) && Number.isFinite(e.after?.configuredMlPerDay)
+      ? Math.round((e.after.configuredMlPerDay - e.before.configuredMlPerDay) * 1e6) / 1e6 : null,
+  })).sort((a, b) => (Date.parse(b.recordedAt || b.effectiveAt) || 0) - (Date.parse(a.recordedAt || a.effectiveAt) || 0));
 }

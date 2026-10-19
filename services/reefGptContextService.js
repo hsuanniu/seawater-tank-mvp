@@ -1,6 +1,7 @@
 import { analyzeTank } from "../engines/analysisEngine.js";
 import { DEFAULT_DOSING } from "../modules/dosingModule.js";
-import { DEFAULT_RESERVOIR_ALERT_DAYS, reservoirDose } from "../modules/reservoirModule.js";
+import { DEFAULT_RESERVOIR_ALERT_DAYS, reservoirDose, dosingHistoryView } from "../modules/reservoirModule.js";
+import { isReefTank } from "../modules/reservoirHistoryModule.js";
 import { evaluateReservoirAvailability } from "../engines/reservoirAlertEngine.js";
 import { getSortedRecords } from "../modules/measurementModule.js";
 import { DEFAULT_TANK, PARAMETERS } from "../modules/tankModule.js";
@@ -50,8 +51,8 @@ function measurementData(record) {
 }
 
 function ownedTanks(state) {
-  if (Array.isArray(state?.tanks)) return state.tanks;
-  if (state?.tank) return [{ ...state, id: state.activeTankId || "legacy-tank" }];
+  if (Array.isArray(state?.tanks)) return state.tanks.filter(isReefTank);
+  if (state?.tank) return isReefTank(state) ? [{ ...state, id: state.activeTankId || "legacy-tank" }] : [];
   throw new Error("INVALID_CLOUD_STATE");
 }
 
@@ -82,6 +83,7 @@ function recentEntries(entries = [], dateKey, now, fields) {
 }
 
 export function buildReefGptContext({ state, tankId, cloudUpdatedAt = null, reservoirs = [], inventoryCalculatedAt = null, now = new Date() }) {
+  if (!tankId && Array.isArray(state?.tanks) && state.tanks.some((entry) => entry.id === state.activeTankId && !isReefTank(entry))) return null;
   const tanks = ownedTanks(state);
   const data = tankId
     ? tanks.find((item) => item.id === tankId)
@@ -174,6 +176,9 @@ export function buildReefGptContext({ state, tankId, cloudUpdatedAt = null, rese
       warning: "GPT 只能讀到最後成功同步的資料；請先核對測量日期與雲端更新時間。",
     },
     dosing: Object.fromEntries(["kh", "ca", "mg", "aplus", "kplus"].map((key) => [key, reservoirDose(data.dosing, key)])),
+    dosingHistory: dosingHistoryView(data.dosingHistory),
+    dosingAdjustmentHistory: dosingHistoryView(data.dosingHistory).filter((e) => e.previousMlPerDay !== e.nextMlPerDay),
+    dosingTimingPolicy: "effectiveAt 為系統設定變更／估算分段時間，deviceSynchronizedAt 未填代表未確認實體泵同步。水質只有 date 時不可推定同日測量發生在調整後。",
     latestMeasurement: measurementData(latest),
     previousMeasurement: measurementData(previous),
     recentMeasurements: records.slice(-8).reverse().map(measurementData),

@@ -108,7 +108,9 @@ test("Cloud SQL rejects stale revisions and malformed snapshots without changing
   await assert.rejects(() => repository.save(original, 1), /CLOUD_REVISION_CONFLICT/);
   await assert.rejects(() => repository.save({ tanks: [{ id: "bad", records: "broken" }] }, 2), /INVALID_CLOUD_STATE/);
   await assert.rejects(() => repository.save({ tanks: [changed.tanks[0], changed.tanks[0]] }, 2), /INVALID_CLOUD_STATE/);
-  assert.deepEqual((await repository.load()).data, changed);
+  assert.deepEqual((await repository.load()).data, saved.data);
+  assert.equal(saved.data.tanks[0].dosingHistory.length, 1);
+  assert.equal(saved.data.tanks[0].dosingHistory[0].changeMlPerDay, 0.4);
 });
 
 test("Admin API requires management authorization for all writes and returns explicit revision conflicts", async () => {

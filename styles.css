@@ -2857,3 +2857,11 @@ th {
 @media (min-width: 900px) {
   .reservoir-list { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
 }
+/* Manual reservoir history stays stacked at narrow iPhone widths. */
+.reservoir-manual-history { margin-block: 16px; min-width: 0; }
+.reservoir-manual-history > summary { min-height: 48px; padding-block: 12px; font-weight: 650; }
+.reservoir-manual-list { list-style: none; padding: 0; margin: 0; }
+.reservoir-manual-list > li { padding-block: 16px; border-top: 1px solid var(--border, #d2e2e7); overflow-wrap: anywhere; }
+.reservoir-manual-list time { display: block; font-size: 14px; color: var(--muted, #45616d); }
+.reservoir-manual-list p { margin-block: 8px; }
+.reservoir-last-refill { margin: 10px 0 0; font-size: 14px; overflow-wrap: anywhere; }
