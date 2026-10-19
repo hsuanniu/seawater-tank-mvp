@@ -110,6 +110,8 @@ export function createReefGptHandler({ token, ownerUserId, loadOwnedState, baseU
       if (!await validBearer(request, token)) return json({ error: "UNAUTHORIZED" }, 401);
       // The owner comes only from server configuration, never from the request.
       if ([...url.searchParams.keys()].length) return json({ error: "QUERY_PARAMETERS_NOT_SUPPORTED" }, 400);
+      // Connection checks must not load tank data or reconcile inventory.
+      if (path === "/auth/verify") return json({ authenticated: true, scope: "reef:read" });
       const match = path.match(/^\/tanks\/([^/]+)\/context$/);
       if (!["/tanks", "/context"].includes(path) && !match) return json({ error: "NOT_FOUND" }, 404);
       const row = await loadOwnedState(ownerUserId);

@@ -174,6 +174,31 @@ test("GPT Actions schema includes an object schemas section and valid production
   }
 });
 
+test("Token verification authenticates without loading water, inventory, or database state", async () => {
+  let reads = 0;
+  const handler = createReefGptHandler({ token, ownerUserId: "owner", baseUrl,
+    loadOwnedState: () => { reads++; throw new Error("must never load for verification"); },
+  });
+  for (let count = 0; count < 3; count++) {
+    const response = await handler(request("/auth/verify"));
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { authenticated: true, scope: "reef:read" });
+    assert.equal(response.headers.get("Cache-Control"), "no-store");
+  }
+  for (const Authorization of ["", "Bearer wrong", token, `Bearer ${token} extra`]) {
+    assert.equal((await handler(request("/auth/verify", { headers: { Authorization } }))).status, 401);
+  }
+  assert.equal((await handler(request("/auth/verify?user_id=another-owner"))).status, 400);
+  for (const method of ["POST", "PUT", "PATCH", "DELETE"]) {
+    assert.equal((await handler(request("/auth/verify", { method }))).status, 405);
+  }
+  const unconfigured = createReefGptHandler({ token: "", ownerUserId: "owner", baseUrl,
+    loadOwnedState: () => { reads++; },
+  });
+  assert.equal((await unconfigured(request("/auth/verify"))).status, 503);
+  assert.equal(reads, 0);
+});
+
 test("OpenAPI is public but all data operations are authenticated GET requests", async () => {
   const schema = reefGptOpenApi(baseUrl);
   assert.equal(schema.servers[0].url, baseUrl);
