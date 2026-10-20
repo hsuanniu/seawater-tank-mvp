@@ -8,7 +8,7 @@
     <link rel="manifest" href="manifest.webmanifest" />
     <link rel="icon" type="image/png" sizes="32x32" href="icons/clownfish-32.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="icons/clownfish-180.png" />
-    <link rel="stylesheet" href="styles.css?v=20261020-inventory-reliability" />
+    <link rel="stylesheet" href="styles.css?v=20261020-bottom-nav" />
   </head>
   <body>
     <div class="app-shell">
@@ -515,14 +515,14 @@
     <div id="measurementSopRoot" class="measurement-sop-root" hidden></div>
 
     <nav class="mobile-bottom-nav" aria-label="手機快速導覽">
-      <button class="nav-link mobile-nav-link active" data-section="dashboard">首頁</button>
-      <button class="nav-link mobile-nav-link mobile-nav-primary" data-section="water">測量</button>
+      <button class="nav-link mobile-nav-link active" data-section="dashboard" aria-current="page">首頁</button>
+      <button class="nav-link mobile-nav-link" data-section="water">測量</button>
       <button class="nav-link mobile-nav-link" data-section="dosing">滴定</button>
       <button class="nav-link mobile-nav-link" data-section="history">紀錄</button>
       <button class="nav-link mobile-nav-link" data-section="tank">設定</button>
     </nav>
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
-    <script type="module" src="app.module.js?v=20261020-inventory-reliability"></script>
-    <script defer src="app.js?v=20261014-admin-cloud"></script>
+    <script type="module" src="app.module.js?v=20261020-bottom-nav"></script>
+    <script defer src="app.js?v=20261020-bottom-nav"></script>
   </body>
 </html>

@@ -190,30 +190,27 @@ button {
   padding: 8px 4px;
   border-color: transparent;
   border-radius: 16px;
+  background: transparent;
   color: #45616f;
+  box-shadow: none;
   text-align: center;
   font-size: 12px;
   font-weight: 850;
   line-height: 1.2;
   overflow: hidden;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .mobile-bottom-nav .nav-link.active {
-  border-color: rgba(8, 127, 160, 0.18);
-  background: linear-gradient(135deg, var(--blue-soft), var(--mint-soft));
-  color: var(--blue-strong);
-}
-
-.mobile-bottom-nav .mobile-nav-primary {
-  background: linear-gradient(135deg, var(--blue), var(--mint));
+  border-color: rgba(8, 127, 160, 0.24);
+  background: linear-gradient(135deg, var(--blue-strong), var(--mint));
   color: #fff;
   box-shadow: 0 10px 20px rgba(8, 127, 160, 0.18);
 }
 
-.mobile-bottom-nav .mobile-nav-primary.active {
-  border-color: rgba(8, 127, 160, 0.24);
-  background: linear-gradient(135deg, var(--blue-strong), var(--mint));
-  color: #fff;
+.mobile-bottom-nav .nav-link:focus-visible {
+  outline: 2px solid var(--blue-strong);
+  outline-offset: 2px;
 }
 
 .visually-hidden {

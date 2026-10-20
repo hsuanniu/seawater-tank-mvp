@@ -24,8 +24,8 @@ import { loadJson, saveJson } from "./services/storageService.js";
 const STORAGE_KEY = "seawaterTankMvp.v4";
 const APP_VERSION_STORAGE_KEY = "seawaterTankAppVersion.v1";
 const FALLBACK_VERSION = {
-  version: "1.5.2",
-  current_version: "1.5.2",
+  version: "1.5.3",
+  current_version: "1.5.3",
   build_time: "2026-10-20T00:00:00+08:00",
 };
 const DEBUG_MODE = false;
@@ -1412,12 +1412,17 @@ function switchPage(id, { updateRoute = true } = {}) {
   if (id === "tank" && hasTanks() && tankFormMode !== "create") tankFormMode = "edit";
   const activeNavSection = navSectionForPage(id);
   document.querySelectorAll(".page").forEach((page) => page.classList.toggle("active", page.id === id));
-  document.querySelectorAll(".nav-link").forEach((link) => link.classList.toggle("active", link.dataset.section === activeNavSection));
+  document.querySelectorAll(".nav-link").forEach((link) => {
+    const active = link.dataset.section === activeNavSection;
+    link.classList.toggle("active", active);
+    if (active) link.setAttribute("aria-current", "page");
+    else link.removeAttribute("aria-current");
+  });
   document.querySelector("#pageTitle").textContent = !hasTanks() && id !== "cloud"
     ? "建立第一個魚缸"
     : pageTitleFor(id);
   if (updateRoute && window.location.hash !== `#${id}`) {
-    history.replaceState(null, "", `#${id}`);
+    history.pushState(null, "", `#${id}`);
   }
   if (id === "analysis") renderAnalysis();
   if (id === "dosing") { renderDosingSavedMeta(); void ReservoirInventory.refresh(); }
