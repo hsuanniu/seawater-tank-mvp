@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test, { before, after, beforeEach } from "node:test";
 import { PGlite } from "@electric-sql/pglite";
-import { createCloudRepository } from "../server/cloudRepository.js";
+import { createCloudRepository, hashToken } from "../server/cloudRepository.js";
 import { cloudServerConfig, createReefCloudHandler, MAX_BODY_BYTES } from "../server/cloudHandler.js";
 import { createAdminCloudClient } from "../services/adminCloudService.js";
 import { deploymentCloudConfig, normalizeAdminCloudConfig } from "../services/cloudConfigService.js";
@@ -10,6 +10,7 @@ const ADMIN = "test-admin-password-for-reef-123456789";
 const READ = "b".repeat(64);
 const API = "https://reef-api.example.com";
 const APP = "https://reef.example.com";
+const DAY_MS = 86_400_000;
 let db;
 let repository;
 let clock;
@@ -39,6 +40,12 @@ function request(path, { method = "GET", token, body, origin = APP } = {}) {
 
 async function login(app, options = {}) {
   const response = await app(request("/api/internal/session", { method: "POST", body: { password: ADMIN, ...options } }));
+  assert.equal(response.status, 200);
+  return response.json();
+}
+
+async function renew(app, token) {
+  const response = await app(request("/api/internal/session/renew", { method: "POST", token }));
   assert.equal(response.status, 200);
   return response.json();
 }
@@ -84,12 +91,54 @@ test("Only an explicit remember-device opt-in issues a 365-day session", async (
   assert.equal(regular.expiresAt, "2026-10-21T02:00:00.000Z");
   assert.equal(invalid.expiresAt, regular.expiresAt);
   assert.equal(Date.parse(remembered.expiresAt) - clock, 365 * 24 * 60 * 60 * 1000);
+  clock += DAY_MS;
+  assert.equal((await renew(app, regular.token)).expiresAt, undefined);
+  assert.equal((await renew(app, invalid.token)).expiresAt, undefined);
   clock = Date.parse(regular.expiresAt);
   assert.equal((await app(request("/api/internal/state", { token: regular.token }))).status, 401);
   clock = Date.parse(remembered.expiresAt) - 1;
   assert.equal((await app(request("/api/internal/state", { token: remembered.token }))).status, 200);
   clock += 1;
   assert.equal((await app(request("/api/internal/state", { token: remembered.token }))).status, 401);
+});
+
+test("A remembered login rolls forward 365 days on explicit renewal, never on a status read", async () => {
+  const app = handler();
+  const session = await login(app, { rememberDevice: true });
+  assert.equal((await renew(app, READ)).authenticated, false);
+  clock += 360 * DAY_MS;
+  const status = await app(request("/api/internal/session", { token: session.token }));
+  assert.equal((await status.json()).authenticated, true);
+  assert.equal((await app(request("/api/internal/session/renew", { token: session.token }))).status, 405);
+  const stored = await db.query("SELECT expires_at FROM reef_controller_sessions");
+  assert.equal(new Date(stored.rows[0].expires_at).toISOString(), session.expiresAt);
+  const firstRenewal = await renew(app, session.token);
+  assert.equal(Date.parse(firstRenewal.expiresAt) - clock, 365 * DAY_MS);
+  clock += 364 * DAY_MS;
+  const secondRenewal = await renew(app, session.token);
+  assert.equal(Date.parse(secondRenewal.expiresAt) - clock, 365 * DAY_MS);
+  clock = Date.parse(secondRenewal.expiresAt);
+  assert.equal((await renew(app, session.token)).authenticated, false);
+});
+
+test("Legacy remembered sessions upgrade without a new password, but ordinary or ambiguous old sessions do not", async () => {
+  const oldApp = handler();
+  const regular = await login(oldApp);
+  const remembered = await login(oldApp, { rememberDevice: true });
+  const ambiguous = await login(oldApp, { rememberDevice: true });
+  await db.query("UPDATE reef_controller_sessions SET expires_at = $1::timestamptz WHERE token_hash = $2", [
+    new Date(clock + 6 * DAY_MS).toISOString(), hashToken(ambiguous.token),
+  ]);
+  await db.exec("ALTER TABLE reef_controller_sessions DROP COLUMN remember_device");
+  repository = createCloudRepository(sql, { now: () => clock });
+  const app = handler();
+  clock += DAY_MS;
+  assert.equal(Date.parse((await renew(app, remembered.token)).expiresAt) - clock, 365 * DAY_MS);
+  for (const token of [regular.token, ambiguous.token]) {
+    const result = await renew(app, token);
+    assert.equal(result.authenticated, true);
+    assert.equal(result.expiresAt, undefined);
+  }
 });
 
 test("Remembered admin sessions can be revoked and rotating the management password invalidates them", async () => {
@@ -99,7 +148,10 @@ test("Remembered admin sessions can be revoked and rotating the management passw
   clock += 8 * 24 * 60 * 60 * 1000;
   assert.equal((await app(request("/api/internal/session", { method: "DELETE", token: first.token }))).status, 200);
   assert.equal((await app(request("/api/internal/state", { token: first.token }))).status, 401);
-  assert.equal((await handler({ adminPassword: `${ADMIN}-rotated` })(request("/api/internal/state", { token: second.token }))).status, 401);
+  assert.equal((await renew(app, first.token)).authenticated, false);
+  const rotated = handler({ adminPassword: `${ADMIN}-rotated` });
+  assert.equal((await rotated(request("/api/internal/state", { token: second.token }))).status, 401);
+  assert.equal((await renew(rotated, second.token)).authenticated, false);
 });
 
 test("Cloud SQL preserves the entire TankStore and initializes only once, including racing imports", async () => {
@@ -195,12 +247,60 @@ test("Browser remembers a device past seven days without saving the password and
   await client.repository.initialize(fixture());
   clock += 8 * 24 * 60 * 60 * 1000;
   const reopened = createAdminCloudClient({ apiUrl: API, storage, fetchImpl, now: () => clock });
-  assert.equal((await reopened.getSession()).authenticated, true);
-  assert.deepEqual((await reopened.repository.load()).data, fixture());
-  await reopened.signOut();
+  assert.equal((await reopened.getSession({ renew: true })).authenticated, true);
+  clock += 360 * DAY_MS;
+  const reopenedAgain = createAdminCloudClient({ apiUrl: API, storage, fetchImpl, now: () => clock });
+  assert.equal((await reopenedAgain.getSession()).authenticated, true);
+  assert.deepEqual((await reopenedAgain.repository.load()).data, fixture());
+  await reopenedAgain.signOut();
   assert.equal((await client.getSession()).authenticated, false);
   assert.ok(values.has("seawaterTankMvp.v4"));
   assert.deepEqual((await repository.load()).data, fixture());
+});
+
+test("An in-flight renewal cannot restore the local credential after signing out", async () => {
+  const app = handler();
+  const values = new Map();
+  const storage = { getItem: (key) => values.get(key), setItem: (key, value) => values.set(key, value), removeItem: (key) => values.delete(key) };
+  const started = Promise.withResolvers();
+  const complete = Promise.withResolvers();
+  const fetchImpl = async (url, options) => {
+    const response = await app(new Request(url, options));
+    if (url.endsWith("/session/renew")) {
+      started.resolve();
+      await complete.promise;
+    }
+    return response;
+  };
+  const client = createAdminCloudClient({ apiUrl: API, storage, fetchImpl, now: () => clock });
+  await client.signIn(ADMIN, { rememberDevice: true });
+  clock += DAY_MS;
+  const pending = client.getSession({ renew: true });
+  await started.promise;
+  try { await client.signOut(); }
+  finally { complete.resolve(); }
+  assert.equal(await pending, null);
+  assert.equal(client.hasLocalSession(), false);
+  assert.equal(values.size, 0);
+});
+
+test("An older API or a network interruption does not erase a still-valid browser session", async () => {
+  const app = handler();
+  const values = new Map();
+  const storage = { getItem: (key) => values.get(key), setItem: (key, value) => values.set(key, value), removeItem: (key) => values.delete(key) };
+  let offline = false;
+  const fetchImpl = (url, options) => {
+    if (offline) throw new TypeError("Network unavailable");
+    if (url.endsWith("/session/renew")) return Response.json({ error: "NOT_FOUND" }, { status: 404 });
+    return app(new Request(url, options));
+  };
+  const client = createAdminCloudClient({ apiUrl: API, storage, fetchImpl, now: () => clock });
+  await client.signIn(ADMIN, { rememberDevice: true });
+  assert.equal((await client.getSession({ renew: true })).authenticated, true);
+  offline = true;
+  await assert.rejects(() => client.getSession({ renew: true }), /Network unavailable/);
+  assert.equal(client.hasLocalSession(), true);
+  assert.equal(values.size, 1);
 });
 
 test("API failure or expired session never removes the phone's TankStore", async () => {

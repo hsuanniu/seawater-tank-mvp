@@ -2,6 +2,10 @@ import { randomBytes, createHash } from "node:crypto";
 import { randomUUID } from "node:crypto";
 import { preserveDosingHistory } from "../services/dosingHistoryService.js";
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+const STANDARD_SESSION_MS = 7 * DAY_MS;
+const REMEMBERED_SESSION_MS = 365 * DAY_MS;
+
 export function hashToken(value) {
   return createHash("sha256").update(value).digest("hex");
 }
@@ -26,6 +30,7 @@ function snapshot(row) {
 
 export function createCloudRepository(sql, { now = () => Date.now() } = {}) {
   let ready;
+  let sessionOptionsReady;
   function ensureSchema() {
     if (!ready) ready = (async () => {
       // Separate statements work with Neon's parameterized HTTP driver.
@@ -37,6 +42,13 @@ export function createCloudRepository(sql, { now = () => Date.now() } = {}) {
         token_hash TEXT PRIMARY KEY, auth_version TEXT NOT NULL, expires_at TIMESTAMPTZ NOT NULL)`;
     })().catch((error) => { ready = null; throw error; });
     return ready;
+  }
+
+  async function ensureSessionOptions() {
+    await ensureSchema();
+    if (!sessionOptionsReady) sessionOptionsReady = sql`ALTER TABLE reef_controller_sessions
+      ADD COLUMN IF NOT EXISTS remember_device BOOLEAN`.catch((error) => { sessionOptionsReady = null; throw error; });
+    return sessionOptionsReady;
   }
 
   return {
@@ -73,14 +85,31 @@ export function createCloudRepository(sql, { now = () => Date.now() } = {}) {
       return snapshot(rows[0]);
     },
     async createSession(authVersion, { rememberDevice = false } = {}) {
-      await ensureSchema();
+      await ensureSessionOptions();
       const token = randomBytes(32).toString("hex");
-      const lifetimeDays = rememberDevice === true ? 365 : 7;
-      const expiresAt = new Date(now() + lifetimeDays * 24 * 60 * 60 * 1000).toISOString();
-      await sql`DELETE FROM reef_controller_sessions WHERE expires_at <= ${new Date(now()).toISOString()}::timestamptz OR auth_version <> ${authVersion}`;
-      await sql`INSERT INTO reef_controller_sessions (token_hash, auth_version, expires_at)
-        VALUES (${hashToken(token)}, ${authVersion}, ${expiresAt}::timestamptz)`;
+      const remembered = rememberDevice === true;
+      const issuedAt = now();
+      const expiresAt = new Date(issuedAt + (remembered ? REMEMBERED_SESSION_MS : STANDARD_SESSION_MS)).toISOString();
+      await sql`DELETE FROM reef_controller_sessions WHERE expires_at <= ${new Date(issuedAt).toISOString()}::timestamptz OR auth_version <> ${authVersion}`;
+      await sql`INSERT INTO reef_controller_sessions (token_hash, auth_version, expires_at, remember_device)
+        VALUES (${hashToken(token)}, ${authVersion}, ${expiresAt}::timestamptz, ${remembered})`;
       return { token, expiresAt, libraryId: await this.libraryId() };
+    },
+    async renewSession(token, authVersion) {
+      if (!/^[a-f0-9]{64}$/.test(token || "")) return null;
+      await ensureSessionOptions();
+      const checkedAt = now();
+      const expiresAt = new Date(checkedAt + REMEMBERED_SESSION_MS).toISOString();
+      // Older rows have no opt-in flag. Require more than a standard lifetime plus clock-skew margin.
+      const legacyCutoff = new Date(checkedAt + STANDARD_SESSION_MS + DAY_MS).toISOString();
+      const rows = await sql`UPDATE reef_controller_sessions
+        SET expires_at = GREATEST(expires_at, ${expiresAt}::timestamptz), remember_device = TRUE
+        WHERE token_hash = ${hashToken(token)} AND auth_version = ${authVersion}
+        AND expires_at > ${new Date(checkedAt).toISOString()}::timestamptz
+        AND (remember_device = TRUE OR (remember_device IS NULL AND expires_at > ${legacyCutoff}::timestamptz))
+        AND (remember_device IS NULL OR expires_at < ${expiresAt}::timestamptz)
+        RETURNING expires_at`;
+      return rows.length ? new Date(rows[0].expires_at).toISOString() : null;
     },
     async hasSession(token, authVersion) {
       if (!/^[a-f0-9]{64}$/.test(token || "")) return false;

@@ -17,15 +17,15 @@ import { escapeHtml, formatNumber, targetToText, toNumber } from "./services/for
 import { restoreBackupText } from "./services/backupService.js";
 import { createTankStore } from "./services/tankStore.js";
 import { loadDeploymentCloudConfig } from "./services/cloudConfigService.js";
-import { createAdminCloudClient } from "./services/adminCloudService.js";
+import { createAdminCloudClient } from "./services/adminCloudService.js?v=1.5.5";
 import { createCloudSyncController } from "./services/cloudSyncService.js";
 import { loadJson, saveJson } from "./services/storageService.js";
 
 const STORAGE_KEY = "seawaterTankMvp.v4";
 const APP_VERSION_STORAGE_KEY = "seawaterTankAppVersion.v1";
 const FALLBACK_VERSION = {
-  version: "1.5.4",
-  current_version: "1.5.4",
+  version: "1.5.5",
+  current_version: "1.5.5",
   build_time: "2026-11-10T00:00:00+08:00",
 };
 const DEBUG_MODE = false;
@@ -1528,11 +1528,18 @@ async function connectCloudSession(session) {
   return connected;
 }
 
-async function refreshCloudSession() {
-  if (!adminCloudClient) return null;
-  const status = await adminCloudClient.getSession();
+async function refreshCloudSession({ reconnect = true } = {}) {
+  const client = adminCloudClient;
+  if (!client) return null;
+  const status = await client.getSession({ renew: true });
+  if (!status || client !== adminCloudClient) return null;
   cloudBackendReady = status.databaseConfigured && status.adminAuthConfigured;
-  await connectCloudSession(status.session);
+  if (reconnect || status.session?.libraryId !== cloudSession?.libraryId) {
+    await connectCloudSession(status.session);
+  } else if (status.session) {
+    cloudConnectionError = "";
+  }
+  renderCloudStatus();
   return cloudSession;
 }
 
@@ -1594,6 +1601,7 @@ function cloudAuthMessage(error) {
 
 async function signInCloud(event) {
   event?.preventDefault();
+  if (cloudAuthBusy) return;
   if (!adminCloudClient || !cloudBackendReady) return showToast("雲端後台尚未啟用，本機紀錄照常保留。");
   const password = document.querySelector("#authPassword").value;
   if (!password) return showToast("請輸入管理密碼。");
@@ -1610,7 +1618,8 @@ async function signInCloud(event) {
 }
 
 async function signOutCloud() {
-  if (!adminCloudClient) return;
+  if (!adminCloudClient || cloudAuthBusy) return;
+  cloudAuthBusy = true;
   window.clearTimeout(cloudSaveTimer);
   CloudSync.disconnect();
   cloudSession = null;
@@ -1619,7 +1628,7 @@ async function signOutCloud() {
     await adminCloudClient.signOut();
     showToast("已登出，暫停雲端同步。");
   } catch { showToast("這台裝置已登出。網路中斷，伺服器連線將於到期時失效。"); }
-  finally { renderCloudStatus(); }
+  finally { cloudAuthBusy = false; renderCloudStatus(); }
 }
 
 function isInventoryPageVisible() {
@@ -1627,6 +1636,18 @@ function isInventoryPageVisible() {
 }
 
 function setupEvents() {
+  let checkingSessionOnResume = false;
+  const renewSessionOnResume = async () => {
+    if (document.hidden || !cloudSetupChecked || cloudAuthBusy || checkingSessionOnResume || !adminCloudClient?.hasLocalSession()) return;
+    checkingSessionOnResume = true;
+    try { await refreshCloudSession({ reconnect: false }); }
+    catch { /* A temporary network failure must not clear the saved login. */ }
+    finally { checkingSessionOnResume = false; }
+  };
+  document.addEventListener("visibilitychange", renewSessionOnResume);
+  window.addEventListener("pageshow", (event) => { if (event.persisted) void renewSessionOnResume(); });
+  window.addEventListener("online", renewSessionOnResume);
+
   const refreshVisibleInventory = () => {
     if (!document.hidden && isInventoryPageVisible()) void ReservoirInventory.refresh();
   };

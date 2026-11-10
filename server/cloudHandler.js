@@ -56,15 +56,19 @@ export function createReefCloudHandler({ repository, inventory = null, cronSecre
     }
     const inventoryPath = url.pathname.match(/^\/api\/internal\/reservoirs\/([^/]+)(?:\/(operations)|\/([^/]+)\/history(?:\/(\d+))?)?$/);
     const sessionPath = url.pathname === "/api/internal/session";
+    const renewalPath = url.pathname === "/api/internal/session/renew";
     const statePath = url.pathname === "/api/internal/state";
     const initializePath = url.pathname === "/api/internal/initialize";
-    if (!sessionPath && !statePath && !initializePath && !inventoryPath) return json({ error: "NOT_FOUND" }, 404);
+    if (!sessionPath && !renewalPath && !statePath && !initializePath && !inventoryPath) return json({ error: "NOT_FOUND" }, 404);
     const methods = inventoryPath ? [inventoryPath[2] ? "POST" : "GET"] : sessionPath ? ["GET", "POST", "DELETE"] : statePath ? ["GET", "PUT"] : ["POST"];
     if (!methods.includes(request.method)) return json({ error: "METHOD_NOT_ALLOWED" }, 405);
     const ready = Boolean(repository && adminPassword);
-    if (sessionPath && request.method === "GET") {
-      const authenticated = ready && await repository.hasSession(bearer(request), authVersion);
-      return json({ authenticated, databaseConfigured: Boolean(repository), adminAuthConfigured: Boolean(adminPassword), libraryId: authenticated ? await repository.libraryId() : null });
+    if ((sessionPath && request.method === "GET") || renewalPath) {
+      const token = bearer(request);
+      const authenticated = ready && await repository.hasSession(token, authVersion);
+      const expiresAt = authenticated && renewalPath ? await repository.renewSession(token, authVersion) : null;
+      return json({ authenticated, databaseConfigured: Boolean(repository), adminAuthConfigured: Boolean(adminPassword),
+        libraryId: authenticated ? await repository.libraryId() : null, ...(expiresAt ? { expiresAt } : {}) });
     }
     if (!ready) return json({ error: "CONNECTION_NOT_CONFIGURED" }, 503);
     if (sessionPath && request.method === "POST") {
