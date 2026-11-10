@@ -33,8 +33,8 @@ export function createAdminCloudClient({ apiUrl, fetchImpl = fetch, storage = lo
       if (!status.authenticated) clearSession();
       return { ...status, session: status.authenticated ? { libraryId: status.libraryId } : null };
     },
-    async signIn(password) {
-      const result = await request("/api/internal/session", { method: "POST", body: { password } });
+    async signIn(password, { rememberDevice = false } = {}) {
+      const result = await request("/api/internal/session", { method: "POST", body: { password, rememberDevice } });
       if (!/^[a-f0-9]{64}$/.test(result.token) || !result.libraryId || !(Date.parse(result.expiresAt) > now())) throw new Error("INVALID_SESSION");
       session = { apiUrl, token: result.token, expiresAt: result.expiresAt };
       // Only a revocable, expiring session is kept. Never persist the admin password.

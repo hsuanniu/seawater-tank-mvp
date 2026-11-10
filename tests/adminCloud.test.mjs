@@ -37,8 +37,8 @@ function request(path, { method = "GET", token, body, origin = APP } = {}) {
   }, ...(body !== undefined ? { body: typeof body === "string" ? body : JSON.stringify(body) } : {}) });
 }
 
-async function login(app) {
-  const response = await app(request("/api/internal/session", { method: "POST", body: { password: ADMIN } }));
+async function login(app, options = {}) {
+  const response = await app(request("/api/internal/session", { method: "POST", body: { password: ADMIN, ...options } }));
   assert.equal(response.status, 200);
   return response.json();
 }
@@ -76,10 +76,27 @@ test("A single admin password creates an expiring session; no Email account is n
   assert.equal((await app(request("/api/internal/state", { token: session.token }))).status, 401);
 });
 
-test("Admin sessions can be revoked and rotating the management password invalidates old sessions", async () => {
+test("Only an explicit remember-device opt-in issues a 365-day session", async () => {
   const app = handler();
-  const first = await login(app);
-  const second = await login(app);
+  const regular = await login(app, { rememberDevice: false });
+  const remembered = await login(app, { rememberDevice: true });
+  const invalid = await login(app, { rememberDevice: "true" });
+  assert.equal(regular.expiresAt, "2026-10-21T02:00:00.000Z");
+  assert.equal(invalid.expiresAt, regular.expiresAt);
+  assert.equal(Date.parse(remembered.expiresAt) - clock, 365 * 24 * 60 * 60 * 1000);
+  clock = Date.parse(regular.expiresAt);
+  assert.equal((await app(request("/api/internal/state", { token: regular.token }))).status, 401);
+  clock = Date.parse(remembered.expiresAt) - 1;
+  assert.equal((await app(request("/api/internal/state", { token: remembered.token }))).status, 200);
+  clock += 1;
+  assert.equal((await app(request("/api/internal/state", { token: remembered.token }))).status, 401);
+});
+
+test("Remembered admin sessions can be revoked and rotating the management password invalidates them", async () => {
+  const app = handler();
+  const first = await login(app, { rememberDevice: true });
+  const second = await login(app, { rememberDevice: true });
+  clock += 8 * 24 * 60 * 60 * 1000;
   assert.equal((await app(request("/api/internal/session", { method: "DELETE", token: first.token }))).status, 200);
   assert.equal((await app(request("/api/internal/state", { token: first.token }))).status, 401);
   assert.equal((await handler({ adminPassword: `${ADMIN}-rotated` })(request("/api/internal/state", { token: second.token }))).status, 401);
@@ -165,7 +182,7 @@ test("Invalid JSON, oversized bodies, unavailable configuration and excessive lo
   assert.equal((await app(request("/api/internal/session", { method: "POST", body: { password: ADMIN } }))).status, 200);
 });
 
-test("Browser stores only an expiring session, survives refresh and signs out without clearing tank data", async () => {
+test("Browser remembers a device past seven days without saving the password and signs out without clearing tank data", async () => {
   const app = handler();
   const values = new Map([["seawaterTankMvp.v4", JSON.stringify(fixture())]]);
   const storage = { getItem: (key) => values.get(key), setItem: (key, value) => values.set(key, value), removeItem: (key) => values.delete(key) };
@@ -173,9 +190,10 @@ test("Browser stores only an expiring session, survives refresh and signs out wi
   const client = createAdminCloudClient({ apiUrl: API, storage, fetchImpl, now: () => clock });
   assert.equal((await client.getSession()).authenticated, false);
   await assert.rejects(() => client.signIn("wrong"), /INVALID_ADMIN_PASSWORD/);
-  await client.signIn(ADMIN);
+  await client.signIn(ADMIN, { rememberDevice: true });
   assert.equal([...values.values()].join("").includes(ADMIN), false);
   await client.repository.initialize(fixture());
+  clock += 8 * 24 * 60 * 60 * 1000;
   const reopened = createAdminCloudClient({ apiUrl: API, storage, fetchImpl, now: () => clock });
   assert.equal((await reopened.getSession()).authenticated, true);
   assert.deepEqual((await reopened.repository.load()).data, fixture());

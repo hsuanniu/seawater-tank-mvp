@@ -58,6 +58,10 @@ function completeMeasurement(overrides = {}) {
   };
 }
 
+function useRetentionFixtureClock(t) {
+  t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-10-20T04:00:00Z") });
+}
+
 function dosingInput(parameter, overrides = {}) {
   const targetRange = DEFAULT_TANK.targets[parameter];
   const currentValue = parameter === "kh" ? 8.2 : parameter === "ca" ? 400 : 1350;
@@ -847,7 +851,8 @@ test("Tank Store starts empty and persists the last selected tank", () => {
   assert.equal(second.tank.name, "SPS 主缸");
 });
 
-test("Measurement Store updates same-date records instead of creating duplicates", () => {
+test("Measurement Store updates same-date records instead of creating duplicates", (t) => {
+  useRetentionFixtureClock(t);
   useStorage();
   const store = createStore("same-date");
   const first = store.upsertMeasurementByDate(completeMeasurement({ kh: 8.1 }));
@@ -860,7 +865,8 @@ test("Measurement Store updates same-date records instead of creating duplicates
   assert.equal(store.getMeasurements()[0].kh, 8.6);
 });
 
-test("Retention cleanup moves records older than six months into archive", () => {
+test("Retention cleanup moves records older than six months into archive", (t) => {
+  useRetentionFixtureClock(t);
   useStorage();
   const store = createStore("retention-six-months");
   store.upsertMeasurementByDate(completeMeasurement({ date: "2025-11-20", kh: 7.9 }));
@@ -888,7 +894,8 @@ test("Retention cleanup keeps at most fifty active records and archives the olde
   assert.equal(store.getArchivedMeasurements()[0].date, recentDate(54));
 });
 
-test("Archived records do not participate in dosing analysis", () => {
+test("Archived records do not participate in dosing analysis", (t) => {
+  useRetentionFixtureClock(t);
   useStorage();
   const store = createStore("archive-not-analysis");
   store.replaceState({
@@ -918,7 +925,8 @@ test("Archived records do not participate in dosing analysis", () => {
   assert.equal(analysis.latest.kh, 8.3);
 });
 
-test("Archived records remain until the user explicitly clears archive", () => {
+test("Archived records remain until the user explicitly clears archive", (t) => {
+  useRetentionFixtureClock(t);
   useStorage();
   const store = createStore("clear-archive");
   store.upsertMeasurementByDate(completeMeasurement({ date: "2025-11-20" }));
@@ -1033,7 +1041,8 @@ test("Backup restore does not replace state for invalid input", () => {
   assert.equal(replacements, 0);
 });
 
-test("Backup restore hydrates a complete TankStore snapshot", () => {
+test("Backup restore hydrates a complete TankStore snapshot", (t) => {
+  useRetentionFixtureClock(t);
   useStorage();
   const source = createStore("backup-source");
   source.updateDosing({ kh: 6.6 });

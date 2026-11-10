@@ -24,9 +24,9 @@ import { loadJson, saveJson } from "./services/storageService.js";
 const STORAGE_KEY = "seawaterTankMvp.v4";
 const APP_VERSION_STORAGE_KEY = "seawaterTankAppVersion.v1";
 const FALLBACK_VERSION = {
-  version: "1.5.3",
-  current_version: "1.5.3",
-  build_time: "2026-10-20T00:00:00+08:00",
+  version: "1.5.4",
+  current_version: "1.5.4",
+  build_time: "2026-11-10T00:00:00+08:00",
 };
 const DEBUG_MODE = false;
 let adminCloudClient = null;
@@ -1597,11 +1597,13 @@ async function signInCloud(event) {
   if (!adminCloudClient || !cloudBackendReady) return showToast("雲端後台尚未啟用，本機紀錄照常保留。");
   const password = document.querySelector("#authPassword").value;
   if (!password) return showToast("請輸入管理密碼。");
+  const rememberDevice = document.querySelector("#authRememberDevice");
   cloudAuthBusy = true;
   renderCloudStatus();
   try {
-    const session = await adminCloudClient.signIn(password);
+    const session = await adminCloudClient.signIn(password, { rememberDevice: rememberDevice.checked });
     document.querySelector("#authPassword").value = "";
+    rememberDevice.checked = false;
     if (await connectCloudSession(session)) showToast("管理連線已建立。");
   } catch (error) { showToast(cloudAuthMessage(error)); }
   finally { cloudAuthBusy = false; renderCloudStatus(); }

@@ -71,9 +71,9 @@ export function createReefCloudHandler({ repository, inventory = null, cronSecre
       if (now() - attemptWindow >= 15 * 60 * 1000) { attemptWindow = now(); attempts = 0; }
       // This is one personal library: a process-wide bound also covers proxy/IP changes.
       if (++attempts > 20) return json({ error: "TOO_MANY_ATTEMPTS" }, 429);
-      const { password } = await readJson(request);
+      const { password, rememberDevice } = await readJson(request);
       if (!matchesPassword(password, adminPassword)) return json({ error: "INVALID_ADMIN_PASSWORD" }, 401);
-      return json(await repository.createSession(authVersion));
+      return json(await repository.createSession(authVersion, { rememberDevice }));
     }
     const sessionToken = bearer(request);
     if (!await repository.hasSession(sessionToken, authVersion)) return json({ error: "SESSION_EXPIRED" }, 401);

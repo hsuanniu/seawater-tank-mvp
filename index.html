@@ -8,7 +8,7 @@
     <link rel="manifest" href="manifest.webmanifest" />
     <link rel="icon" type="image/png" sizes="32x32" href="icons/clownfish-32.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="icons/clownfish-180.png" />
-    <link rel="stylesheet" href="styles.css?v=20261020-bottom-nav" />
+    <link rel="stylesheet" href="styles.css?v=20261110-remember-device" />
   </head>
   <body>
     <div class="app-shell">
@@ -489,6 +489,7 @@
               <div class="form-grid">
                 <label>管理密碼<input id="authPassword" type="password" autocomplete="current-password" placeholder="輸入管理密碼" required /></label>
               </div>
+              <label class="checkbox-row"><input id="authRememberDevice" type="checkbox" />記住這台裝置（365 天）</label>
               <button class="primary-button" id="signInBtn" type="submit">連線雲端資料庫</button>
             </form>
             <button class="ghost-button" id="cloudRetrySetupBtn" type="button" hidden>重試連線</button>
@@ -522,7 +523,7 @@
       <button class="nav-link mobile-nav-link" data-section="tank">設定</button>
     </nav>
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
-    <script type="module" src="app.module.js?v=20261020-bottom-nav"></script>
-    <script defer src="app.js?v=20261020-bottom-nav"></script>
+    <script type="module" src="app.module.js?v=20261110-remember-device"></script>
+    <script defer src="app.js?v=20261110-remember-device"></script>
   </body>
 </html>

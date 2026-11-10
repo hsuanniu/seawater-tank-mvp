@@ -1823,7 +1823,7 @@ button:disabled {
   grid-template-columns: minmax(0, 1fr);
 }
 
-.cloud-sync-page input {
+.cloud-sync-page input:not([type="checkbox"]) {
   min-height: 52px;
   font-size: 16px;
 }

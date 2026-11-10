@@ -72,10 +72,11 @@ export function createCloudRepository(sql, { now = () => Date.now() } = {}) {
       if (!rows.length) throw new Error("CLOUD_REVISION_CONFLICT");
       return snapshot(rows[0]);
     },
-    async createSession(authVersion) {
+    async createSession(authVersion, { rememberDevice = false } = {}) {
       await ensureSchema();
       const token = randomBytes(32).toString("hex");
-      const expiresAt = new Date(now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+      const lifetimeDays = rememberDevice === true ? 365 : 7;
+      const expiresAt = new Date(now() + lifetimeDays * 24 * 60 * 60 * 1000).toISOString();
       await sql`DELETE FROM reef_controller_sessions WHERE expires_at <= ${new Date(now()).toISOString()}::timestamptz OR auth_version <> ${authVersion}`;
       await sql`INSERT INTO reef_controller_sessions (token_hash, auth_version, expires_at)
         VALUES (${hashToken(token)}, ${authVersion}, ${expiresAt}::timestamptz)`;
